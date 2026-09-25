@@ -41,6 +41,8 @@ GrabModeAsync = 1
 XIAllDevices = 0
 XIAllMasterDevices = 1
 
+XI_RawKeyPress = 13
+XI_RawKeyRelease = 14
 XI_RawButtonPress = 15
 XI_RawMotion = 17
 

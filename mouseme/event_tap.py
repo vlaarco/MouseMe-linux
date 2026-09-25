@@ -13,6 +13,9 @@ _LOCK_COMBOS = [0, x11.LockMask, x11.Mod2Mask, x11.LockMask | x11.Mod2Mask]
 # QI keys pressed with Ctrl, Alt or Super are never grabbed, so browser and desktop shortcuts keep working
 _SHORTCUT_MASK = x11.ControlMask | x11.Mod1Mask | x11.Mod4Mask
 
+# Synergy repeats a held key as a release and an immediate re-press; no real tap re-presses a key this quickly
+_SYNERGY_REPEAT_GAP_MS = 20
+
 
 # System-wide mouse and keyboard watcher; the X11 counterpart of the macOS event tap and Windows low-level hooks.
 # Runs on its own thread with its own display connection and reports to the engine through callbacks.
@@ -34,6 +37,13 @@ class EventTap(threading.Thread):
 
         self._keycodes = {x11.keycode(self._display, name): name for name in QIConfig.keys}
 
+        # Keys physically pressed whose key-press hasn't been reported yet. Raw events only come from real presses,
+        # never auto-repeat, so a key-press for a key not in here is a repeat from holding the key down.
+        self._fresh_presses = set()
+
+        # When each key was last released, in X server time
+        self._release_times = {}
+
         devices = x11.devices(self._display)
         self._master_pointer = next(d.id for d in devices if d.use == x11.XIMasterPointer)
         self._xtest_ids = {d.id for d in devices if d.is_xtest}
@@ -51,7 +61,7 @@ class EventTap(threading.Thread):
 
     def _select_raw_events(self):
         mask = (ctypes.c_ubyte * 4)()
-        for evtype in (x11.XI_RawButtonPress, x11.XI_RawMotion):
+        for evtype in (x11.XI_RawKeyPress, x11.XI_RawKeyRelease, x11.XI_RawButtonPress, x11.XI_RawMotion):
             mask[evtype >> 3] |= 1 << (evtype & 7)
 
         # All devices, not just masters, so detached pointers still report movement
@@ -117,8 +127,14 @@ class EventTap(threading.Thread):
             key = event.xkey
             name = self._keycodes.get(key.keycode)
 
+            # Holding a key repeats its key-press; only the first press counts, and the grab swallows the repeats
+            if name is None or key.keycode not in self._fresh_presses:
+                return
+
+            self._fresh_presses.discard(key.keycode)
+
             # While a grabbed key is held the whole keyboard is grabbed, so other keys can arrive here too
-            if name is not None and not key.state & _SHORTCUT_MASK:
+            if not key.state & _SHORTCUT_MASK:
                 self._on_key_down(name)
             return
 
@@ -134,6 +150,16 @@ class EventTap(threading.Thread):
 
             if cookie.evtype == x11.XI_RawMotion:
                 self._add_motion(raw)
+
+            elif cookie.evtype == x11.XI_RawKeyPress:
+                # Synergy sends each repeat of a held key as a release and an immediate re-press
+                released = self._release_times.get(raw.detail)
+                if released is None or raw.time - released >= _SYNERGY_REPEAT_GAP_MS:
+                    self._fresh_presses.add(raw.detail)
+
+            elif cookie.evtype == x11.XI_RawKeyRelease:
+                self._fresh_presses.discard(raw.detail)
+                self._release_times[raw.detail] = raw.time
 
             elif cookie.evtype == x11.XI_RawButtonPress and raw.deviceid == self._master_pointer and raw.detail == 1:
                 x, y = x11.query_pointer(self._display)
