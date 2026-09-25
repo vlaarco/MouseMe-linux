@@ -30,15 +30,19 @@ def main():
     import gi
     gi.require_version("Gtk", "3.0")
     gi.require_version("Gdk", "3.0")
-    from gi.repository import GLib, Gtk
+    from gi.repository import GLib
+
+    # Must come before Gdk or Gtk is imported, which initializes GDK and fixes the window's WM_CLASS ("MouseMe", "MouseMe").
+    # The dock matches that class to StartupWMClass in the launcher to put the running window under its pinned icon.
+    GLib.set_prgname("MouseMe")
+    GLib.set_application_name("MouseMe")
+
+    from gi.repository import Gtk
 
     from .engine import Engine
     from .event_tap import EventTap
     from .main_window import MainWindow
     from .settings import Settings
-
-    GLib.set_prgname("mouseme")
-    GLib.set_application_name("MouseMe")
 
     engine = Engine(debug=args.debug)
     engine.event_tap = EventTap(

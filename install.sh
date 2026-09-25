@@ -16,7 +16,7 @@ Path=$dir
 Icon=$dir/mouseme/icon.png
 Terminal=false
 Categories=Utility;
-StartupWMClass=mouseme
+StartupWMClass=MouseMe
 EOF
 
 echo "Installed $target"
