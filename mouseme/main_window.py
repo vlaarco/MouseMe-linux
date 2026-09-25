@@ -45,8 +45,9 @@ class MainWindow(Gtk.Window):
         if icon_path:
             self.set_icon_from_file(icon_path)
 
+        # Fall back to the center of the screen if the saved position is no longer fully on a monitor, such as after unplugging one
         position = settings[SettingsKey.window_position]
-        if isinstance(position, list) and len(position) == 2:
+        if isinstance(position, list) and len(position) == 2 and self._fits_on_a_monitor(*position):
             self.move(*position)
         else:
             self.set_position(Gtk.WindowPosition.CENTER)
@@ -70,6 +71,20 @@ class MainWindow(Gtk.Window):
     def _restore(self):
         self.deiconify()
         self.present()
+        return False
+
+    def _fits_on_a_monitor(self, x, y):
+        if not isinstance(x, int) or not isinstance(y, int):
+            return False
+
+        _, size = self.get_preferred_size()
+        display = self.get_display()
+
+        for i in range(display.get_n_monitors()):
+            area = display.get_monitor(i).get_workarea()
+            if area.x <= x and area.y <= y and x + size.width <= area.x + area.width and y + size.height <= area.y + area.height:
+                return True
+
         return False
 
     # MARK: - UI
