@@ -508,6 +508,10 @@ class Engine:
 
         for point in points:
             await self._human_move(self.mouse.location, point)
+
+            # Rest on the target before pressing, so the game has seen the pointer over it for a few frames
+            await self._sleep(random.randint(40, 70))
+
             self.mouse.left_down(*point)
             await self._sleep(50)
             self.mouse.left_up(*point)
