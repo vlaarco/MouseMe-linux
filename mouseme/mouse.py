@@ -88,8 +88,7 @@ class Mouse:
             return
 
         detached, self._detached = self._detached, []
-        x11.change_hierarchy(self._display, [x11.attach(d.id, d.attachment) for d in detached])
-        _clear_state()
+        self._reattach(_state_entries(detached))
 
     # Reattaches pointers a previous run left detached, if it crashed or was killed mid-sequence
     def recover_detached(self):
@@ -99,21 +98,38 @@ class Mouse:
         except (OSError, ValueError):
             return
 
-        floating = {d.id: d for d in x11.devices(self._display) if d.use == x11.XIFloatingSlave}
-        changes = [
-            x11.attach(entry["id"], entry["master"])
-            for entry in saved
-            if entry["id"] in floating and floating[entry["id"]].name == entry["name"]
-        ]
+        self._reattach(saved)
 
-        x11.change_hierarchy(self._display, changes)
-        _clear_state()
+    # Reattaches each pointer in its own request: the server rejects a whole request if any device in it is gone,
+    # so one pointer unplugged mid-sequence would otherwise leave all the others detached.
+    # Any that are still detached afterwards stay in the state file, so the next launch tries again.
+    def _reattach(self, entries):
+        def still_floating():
+            floating = {d.id: d.name for d in x11.devices(self._display) if d.use == x11.XIFloatingSlave}
+            return [e for e in entries if floating.get(e["id"]) == e["name"]]
+
+        for entry in still_floating():
+            x11.change_hierarchy(self._display, [x11.attach(entry["id"], entry["master"])])
+
+        remaining = still_floating()
+        if remaining:
+            _write_state(remaining)
+        else:
+            _clear_state()
+
+
+def _state_entries(devices):
+    return [{"id": d.id, "name": d.name, "master": d.attachment} for d in devices]
 
 
 def _save_state(devices):
+    _write_state(_state_entries(devices))
+
+
+def _write_state(entries):
     os.makedirs(_STATE_DIR, exist_ok=True)
     with open(_STATE_FILE, "w") as f:
-        json.dump([{"id": d.id, "name": d.name, "master": d.attachment} for d in devices], f)
+        json.dump(entries, f)
 
 
 def _clear_state():
