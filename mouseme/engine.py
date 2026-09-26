@@ -78,6 +78,9 @@ class Engine:
         self._suppress_mouse_input = False
         self._suppress_token = 0
 
+        # Which QI run turned suppression on, so an older run never releases a newer run's blocking
+        self._suppress_owner_run_id = 0
+
     def start_thread(self):
         ready = threading.Event()
         self.loop.call_soon(ready.set)
@@ -149,7 +152,7 @@ class Engine:
             await self._keyboard_clicks(run_id)
         finally:
             # Never leave physical mouse input blocked or keys captured once the QI loop ends
-            self._release_mouse_input()
+            self._release_mouse_input(run_id)
 
             if run_id == self._current_run_id:
                 self._set_qi_active(False)
@@ -441,7 +444,7 @@ class Engine:
                     if confirm_points:
                         self._last_qi_confirm_key = building_key
                         overlay.set_text(QIConfig.actions[building_key].label)
-                        await self._perform_click_sequence(confirm_points)
+                        await self._perform_click_sequence(run_id, confirm_points)
 
                     # The game stays in Sell mode after selling, ready for the next building
                     overlay.set_text(sell_label)
@@ -457,14 +460,21 @@ class Engine:
                     overlay.set_text(action.label)
 
                     if is_new_key and action.setup:
-                        await self._perform_click_sequence(action.setup)
+                        await self._perform_click_sequence(run_id, action.setup)
 
-                    await self._perform_click_sequence(action.clicks)
+                    await self._perform_click_sequence(run_id, action.clicks)
 
                     if key in QIConfig.transient_keys:
                         self._revert_to_qi_label_later(run_id)
 
-            await self._return_cursor(current_position)
+            # A newer run owns the cursor now; just let go of any blocking this run started
+            if is_stale():
+                self._release_mouse_input(run_id)
+                return
+
+            # Only return the cursor if a click sequence took it over
+            if self._suppress_mouse_input:
+                await self._return_cursor(current_position, run_id)
 
         self._stop_task()
 
@@ -503,10 +513,15 @@ class Engine:
         return await self._pending_key
 
     # Physical mouse input stays suppressed from the first click until return_cursor finishes
-    async def _perform_click_sequence(self, points, delay=100):
+    async def _perform_click_sequence(self, run_id, points, delay=100):
         self._suppress_physical_mouse()
+        self._suppress_owner_run_id = run_id
 
         for point in points:
+            # Stop between clicks once the run is cancelled (window moved or restored) or replaced by a newer one
+            if run_id != self._current_run_id or self.overlay is None:
+                return
+
             await self._human_move(self.mouse.location, point)
 
             # Rest on the target before pressing, so the game has seen the pointer over it for a few frames
@@ -518,7 +533,7 @@ class Engine:
             await self._sleep(delay)
 
     # Moves the cursor back to its start position plus any physical movement made during the click sequence
-    async def _return_cursor(self, start):
+    async def _return_cursor(self, start, run_id):
         try:
             dx, dy = self.event_tap.take_motion() if self._suppress_mouse_input else (0, 0)
 
@@ -530,7 +545,7 @@ class Engine:
 
             await self._human_move(self.mouse.location, target, 50)
         finally:
-            self._release_mouse_input()
+            self._release_mouse_input(run_id)
 
     def _suppress_physical_mouse(self):
         if self._suppress_mouse_input:
@@ -543,8 +558,9 @@ class Engine:
         token = self._suppress_token
         self.loop.call_later(self.MAX_SUPPRESS_SECONDS, lambda: token == self._suppress_token and self._release_mouse_input())
 
-    def _release_mouse_input(self):
-        if not self._suppress_mouse_input:
+    # Lets physical mouse input through again; given a run, only if that run started the blocking and no newer run has taken it over
+    def _release_mouse_input(self, run_id=None):
+        if not self._suppress_mouse_input or (run_id is not None and run_id != self._suppress_owner_run_id):
             return
 
         self._suppress_mouse_input = False
