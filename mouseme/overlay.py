@@ -29,6 +29,11 @@ class OverlayPanel:
         self._color = "#ff3b30"
         self._height = DEFAULT_HEIGHT
 
+        # The latest text and how many times it has changed, kept on the calling (engine) thread;
+        # the version lets a delayed revert tell a newer label has replaced its own
+        self.text = ""
+        self.text_version = 0
+
     def show(self):
         GLib.idle_add(self._show)
 
@@ -39,6 +44,8 @@ class OverlayPanel:
         self.set(text, None)
 
     def set(self, text, color):
+        self.text = text
+        self.text_version += 1
         GLib.idle_add(self._set, text, color)
 
     # MARK: - GTK thread

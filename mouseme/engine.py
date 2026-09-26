@@ -34,6 +34,10 @@ class _Stopped(Exception):
     pass
 
 
+# Given to a "Which building?" wait when a toolbar or build menu click has already left Sell mode
+_LEFT_PROMPT = "left-prompt"
+
+
 # Recording, replay and QI logic. Everything runs on one asyncio loop on its own thread, including the event tap
 # callbacks, so no locking is needed; the loops yield between steps with asyncio.sleep.
 # UI calls (controller and overlay) are thread-safe and hop onto the GTK thread themselves.
@@ -63,6 +67,9 @@ class Engine:
         self._current_run_id = 0
 
         self._qi_active = False
+
+        # True while QI waits at "Which building?"; a toolbar or build menu click ends the wait with _LEFT_PROMPT
+        self._awaiting_building_key = False
         self._pending_key = None
         self._buffered_qi_key = None
         self._last_qi_key = None
@@ -209,6 +216,25 @@ class Engine:
         # A physical click in the browser tab strip means the tab may have changed, so the next QI key reruns its setup
         if y < QIConfig.tab_strip_max_y and not injected:
             self._last_qi_key = None
+
+        # Clicking a toolbar button yourself during QI changes the game's mode the same way its QI key does, so the label follows
+        if not injected and self._qi_active and self.overlay is not None:
+            for key, (left, top, width, height) in QIConfig.toolbar_buttons.items():
+                if left <= x < left + width and top <= y < top + height:
+                    self.overlay.set_text(QIConfig.actions[key].label)
+                    self._leave_building_prompt()
+
+                    if key in QIConfig.transient_keys:
+                        self._revert_to_qi_label_later(self._current_run_id)
+                    break
+
+        # Clicking in the build menu yourself during QI ends the game's Sell or Move mode
+        mode_labels = {QIConfig.actions[key].label for key in QIConfig.mode_keys}
+        in_build_menu = any(left <= x < left + width and top <= y < top + height for left, top, width, height in QIConfig.build_menu_areas)
+        in_sell_or_move = self.overlay is not None and (self.overlay.text in mode_labels or self._awaiting_building_key)
+        if not injected and self._qi_active and in_sell_or_move and in_build_menu:
+            self.overlay.set_text("QI")
+            self._leave_building_prompt()
 
         # Only record physical clicks, never ones injected by a replay
         overlay = self.overlay
@@ -360,6 +386,12 @@ class Engine:
             if overlay is None:
                 break
 
+            # Space confirms selling a building, so it's ignored unless the game is in Sell mode.
+            # A prompt-ending click that arrived just after the prompt ended is ignored too.
+            sell_label = QIConfig.actions[Key.s].label
+            if key == _LEFT_PROMPT or (key == Key.space and overlay.text != sell_label):
+                continue
+
             is_new_key = key != self._last_qi_key
             self._last_qi_key = key
 
@@ -368,20 +400,38 @@ class Engine:
             if key == Key.space:
                 overlay.set_text("Which building?")
 
+                self._awaiting_building_key = True
                 try:
                     building_key = await self._wait_for_key()
                 except _Stopped:
                     return
+                finally:
+                    self._awaiting_building_key = False
 
                 if is_stale():
                     return
+
+                if building_key == _LEFT_PROMPT:
+                    # A toolbar or build menu click already left Sell mode and set the label
+                    self._last_qi_key = None
+                    continue
 
                 # Keep any movement made while choosing the building
                 current_position = self.mouse.location
 
                 if building_key == Key.x:
-                    overlay.set_text("QI")
+                    # Cancelled; the game is still in Sell mode
+                    overlay.set_text(sell_label)
                     self._last_qi_key = None
+                elif building_key != Key.space and building_key not in QIConfig.building_confirm:
+                    # Not a building to sell, so it's a new command: leave the prompt and run it as usual
+                    overlay.set_text(sell_label)
+
+                    if self._buffered_qi_key is None:
+                        self._buffered_qi_key = building_key
+
+                    self._last_qi_key = None
+                    continue
                 elif self.overlay is not None:
                     if building_key == Key.space and self._last_qi_confirm_key is not None:
                         # Repeat last building confirm
@@ -390,10 +440,11 @@ class Engine:
                     confirm_points = QIConfig.building_confirm.get(building_key)
                     if confirm_points:
                         self._last_qi_confirm_key = building_key
-                        overlay.set_text("Confirm")
+                        overlay.set_text(QIConfig.actions[building_key].label)
                         await self._perform_click_sequence(confirm_points)
 
-                    overlay.set_text("QI")
+                    # The game stays in Sell mode after selling, ready for the next building
+                    overlay.set_text(sell_label)
                     self._last_qi_key = None
 
             elif key == Key.x:
@@ -410,9 +461,38 @@ class Engine:
 
                     await self._perform_click_sequence(action.clicks)
 
+                    if key in QIConfig.transient_keys:
+                        self._revert_to_qi_label_later(run_id)
+
             await self._return_cursor(current_position)
 
         self._stop_task()
+
+    # Puts "QI" back after a one-off action's label, unless a newer label or a newer run has taken over by then
+    def _revert_to_qi_label_later(self, run_id):
+        overlay = self.overlay
+        if overlay is None:
+            return
+
+        version = overlay.text_version
+
+        def revert():
+            if run_id == self._current_run_id and self.overlay is overlay and overlay.text_version == version:
+                overlay.set_text("QI")
+
+        self.loop.call_later(QIConfig.transient_label_seconds, revert)
+
+    # Ends a "Which building?" prompt after a click that left Sell mode, without treating the click as a building
+    def _leave_building_prompt(self):
+        if not self._awaiting_building_key:
+            return
+
+        if self._pending_key is not None:
+            pending, self._pending_key = self._pending_key, None
+            if not pending.done():
+                pending.set_result(_LEFT_PROMPT)
+        else:
+            self._buffered_qi_key = _LEFT_PROMPT
 
     async def _wait_for_key(self):
         if self._buffered_qi_key is not None:

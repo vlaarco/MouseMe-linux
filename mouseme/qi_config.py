@@ -82,6 +82,28 @@ class QIConfig:
         Key.y: [(1100, 950), (1400, 1000)],
     }
 
+    # Actions whose label reverts to "QI" after a few seconds; every other label stays until the next key
+    transient_keys = {Key.escape, Key.f, Key.z}
+    transient_label_seconds = 3
+
+    # The toolbar buttons by QI key as (left, top, width, height), each 43 x 43 and 50 apart.
+    # Clicking one yourself changes the game's mode just like its QI key does, so the label follows either way.
+    toolbar_buttons = {
+        Key.s: (1184, 286, 43, 43),
+        Key.v: (1234, 286, 43, 43),
+        Key.f: (1284, 286, 43, 43),
+        Key.escape: (1334, 286, 43, 43),
+    }
+
+    # The build menu the Build button opens (with the panel below it) and the category tabs down its right side,
+    # as (left, top, width, height). Clicking in either yourself ends the game's Sell or Move mode, so those labels go back to "QI".
+    build_menu_areas = [
+        (0, 856, 223, 534),
+        (223, 902, 35, 244),
+    ]
+
+    mode_keys = {Key.s, Key.v}
+
     gbg_click: Point = (1300, 1052)
 
     # A physical click above this line is in the browser tab strip
