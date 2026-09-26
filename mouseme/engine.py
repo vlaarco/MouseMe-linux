@@ -420,9 +420,9 @@ class Engine:
                 current_position = self.mouse.location
 
                 if building_key == Key.x:
-                    # Cancelled; the game is still in Sell mode
-                    overlay.set_text(sell_label)
-                    self._last_qi_key = None
+                    # X stops QI here too; Esc or a toolbar click leaves the prompt without stopping it
+                    self._stop_task(restore_window=False)
+                    return
                 elif building_key != Key.space and building_key not in QIConfig.building_confirm:
                     # Not a building to sell, so it's a new command: leave the prompt and run it as usual
                     overlay.set_text(sell_label)
