@@ -14,6 +14,8 @@ class SettingsKey:
     gbg = "GBG"
     qi = "QI"
     stay_on_top = "StayOnTop"
+    build_menu = "BuildMenu"
+    build_menu_targets = "BuildMenuTargets"
     window_position = "WindowPosition"
 
     defaults = {
@@ -25,6 +27,8 @@ class SettingsKey:
         gbg: False,
         qi: False,
         stay_on_top: False,
+        build_menu: False,
+        build_menu_targets: None,
         window_position: None,
     }
 

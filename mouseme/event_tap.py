@@ -5,7 +5,7 @@ import select
 import threading
 
 from . import x11
-from .qi_config import QIConfig
+from .qi_config import BuildMenuConfig, QIConfig
 
 # QI keys are grabbed with and without these, so Caps Lock and Num Lock don't stop the grab from matching
 _LOCK_COMBOS = [0, x11.LockMask, x11.Mod2Mask, x11.LockMask | x11.Mod2Mask]
@@ -35,7 +35,8 @@ class EventTap(threading.Thread):
         self._root = x11.XDefaultRootWindow(self._display)
         self._xi_opcode = x11.xi_opcode(self._display)
 
-        self._keycodes = {x11.keycode(self._display, name): name for name in QIConfig.keys}
+        self._keycodes = {x11.keycode(self._display, name): name for name in QIConfig.keys + BuildMenuConfig.keys}
+        self._grabbed_keycodes = set()
 
         # Keys physically pressed whose key-press hasn't been reported yet. Raw events only come from real presses,
         # never auto-repeat, so a key-press for a key not in here is a repeat from holding the key down.
@@ -71,8 +72,16 @@ class EventTap(threading.Thread):
 
     # MARK: - Called from other threads
 
-    def grab_qi_keys(self, grab):
-        self._commands.put(grab)
+    # Grabs these key names (a mode's keys) and releases any others; an empty list releases them all
+    def grab_keys(self, names):
+        self._send(("keys", frozenset(names)))
+
+    # While grabbed, clicks go to MouseMe instead of the window under the cursor, which still moves as usual
+    def grab_pointer(self, grab):
+        self._send(("pointer", grab))
+
+    def _send(self, command):
+        self._commands.put(command)
         os.write(self._wake_w, b"\0")
 
     def track_motion(self, device_ids):
@@ -110,17 +119,31 @@ class EventTap(threading.Thread):
     def _run_commands(self):
         while True:
             try:
-                grab = self._commands.get_nowait()
+                kind, value = self._commands.get_nowait()
             except queue.Empty:
                 return
 
-            for keycode in self._keycodes:
+            if kind == "pointer":
+                if value:
+                    mask = x11.ButtonPressMask | x11.ButtonReleaseMask
+                    x11.XGrabPointer(self._display, self._root, False, mask, x11.GrabModeAsync, x11.GrabModeAsync, 0, 0, x11.CurrentTime)
+                else:
+                    x11.XUngrabPointer(self._display, x11.CurrentTime)
+                continue
+
+            wanted = {keycode for keycode, name in self._keycodes.items() if name in value}
+
+            for keycode in self._grabbed_keycodes - wanted:
                 for base in (0, x11.ShiftMask):
                     for lock in _LOCK_COMBOS:
-                        if grab:
-                            x11.XGrabKey(self._display, keycode, base | lock, self._root, False, x11.GrabModeAsync, x11.GrabModeAsync)
-                        else:
-                            x11.XUngrabKey(self._display, keycode, base | lock, self._root)
+                        x11.XUngrabKey(self._display, keycode, base | lock, self._root)
+
+            for keycode in wanted - self._grabbed_keycodes:
+                for base in (0, x11.ShiftMask):
+                    for lock in _LOCK_COMBOS:
+                        x11.XGrabKey(self._display, keycode, base | lock, self._root, False, x11.GrabModeAsync, x11.GrabModeAsync)
+
+            self._grabbed_keycodes = wanted
 
     def _dispatch(self, event):
         if event.type == x11.KeyPress:

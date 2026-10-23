@@ -4,6 +4,7 @@ import cairo
 from gi.repository import Gdk, GLib, Gtk
 
 from .engine import RunMode, RunSettings
+from .qi_config import BuildMenuConfig
 from .overlay import OverlayPanel
 from .settings import SettingsKey
 
@@ -45,6 +46,13 @@ _SWORDS_ICON = [
     [(10, 5.5), (8, 3), (3, 3), (3, 8), (6, 10.5)],
 ]
 
+# The Tabler "hammer" icon for Build Menu, with its rounded ends approximated
+_HAMMER_ICON = [
+    [(11.414, 10), (4.031, 17.418), (3.4, 18.9), (4.031, 20.385), (5.52, 21), (7.007, 20.385), (14.414, 13)],
+    [(18.121, 15.293), (20.707, 12.707), (21, 12), (20.707, 11.293), (13.121, 3.707), (12.414, 3.414), (11.707, 3.707),
+     (9.121, 6.293), (8.828, 7), (9.121, 7.707), (16.707, 15.293), (17.414, 15.586), (18.121, 15.293)],
+]
+
 _ICON_SIZE = 18
 
 
@@ -57,6 +65,7 @@ class MainWindow(Gtk.Window):
         # Read from the engine thread, so kept as plain values rather than asking GTK
         self.is_minimized = False
         self.is_gbg_checked = False
+        self.is_stay_on_top = False
 
         self._position = None
         self._save_position_source = None
@@ -80,6 +89,10 @@ class MainWindow(Gtk.Window):
         self._icon_bar = Gtk.Box(spacing=6)
         self._qi_check_box = self._icon_toggle(_ATOM_ICON, _ATOM_ICON)
         self._gbg_check_box = self._icon_toggle(_SWORDS_ICON, _SWORDS_ICON)
+        self._build_menu_check_box = self._icon_toggle(_HAMMER_ICON, _HAMMER_ICON)
+
+        # QI, GBG and Build Menu exclude each other
+        self._mode_buttons = [self._qi_check_box, self._gbg_check_box, self._build_menu_check_box]
         self._pin_button = self._icon_toggle(_PIN_ICON, _PINNED_ICON)
 
         self._build_ui()
@@ -104,6 +117,22 @@ class MainWindow(Gtk.Window):
 
     def create_overlay(self):
         return OverlayPanel()
+
+    # The calibrated Build Menu spots, or None until all of them have been calibrated
+    @property
+    def build_menu_targets(self):
+        saved = self._settings[SettingsKey.build_menu_targets]
+        if isinstance(saved, list) and len(saved) == len(BuildMenuConfig.target_keys) and all(isinstance(p, list) and len(p) == 2 for p in saved):
+            return [tuple(p) for p in saved]
+        return None
+
+    def save_build_menu_targets(self, targets):
+        GLib.idle_add(self._save_build_menu_targets, [list(p) for p in targets])
+
+    def _save_build_menu_targets(self, targets):
+        self._settings[SettingsKey.build_menu_targets] = targets
+        self._settings.save()
+        return False
 
     def minimize(self):
         # Iconifying hands focus back to the window underneath, which is the game
@@ -156,6 +185,9 @@ class MainWindow(Gtk.Window):
         self._gbg_check_box.set_tooltip_text("Guild Battlegrounds mode")
         self._icon_bar.pack_start(self._gbg_check_box, False, False, 0)
 
+        self._build_menu_check_box.set_tooltip_text("Build Menu mode")
+        self._icon_bar.pack_start(self._build_menu_check_box, False, False, 0)
+
         self._pin_button.connect("toggled", self._pin_button_changed)
         self._icon_bar.pack_end(self._pin_button, False, False, 0)
         grid.attach(self._icon_bar, 0, 0, 2, 1)
@@ -178,8 +210,8 @@ class MainWindow(Gtk.Window):
             grid.attach(cell, 1, i + 1, 1, 1)
 
 
-        self._qi_check_box.connect("toggled", self._qi_check_box_changed)
-        self._gbg_check_box.connect("toggled", self._gbg_check_box_changed)
+        for button in self._mode_buttons:
+            button.connect("toggled", self._mode_changed)
 
         self._start_button.set_can_default(True)
         self._start_button.connect("clicked", self._start_clicked)
@@ -211,6 +243,7 @@ class MainWindow(Gtk.Window):
 
         self._gbg_check_box.set_active(bool(s[SettingsKey.gbg]))
         self._qi_check_box.set_active(bool(s[SettingsKey.qi]) and not self._gbg_check_box.get_active())
+        self._build_menu_check_box.set_active(bool(s[SettingsKey.build_menu]) and not self._qi_check_box.get_active() and not self._gbg_check_box.get_active())
         self._update_field_visibility()
 
         self._pin_button.set_active(bool(s[SettingsKey.stay_on_top]))
@@ -226,6 +259,7 @@ class MainWindow(Gtk.Window):
     # Stays above every other window, including after a run minimizes and restores it, until the pin is clicked again
     def _apply_stay_on_top(self):
         pinned = self._pin_button.get_active()
+        self.is_stay_on_top = pinned
 
         self.set_keep_above(pinned)
         self._pin_button.set_tooltip_text("Stop keeping MouseMe on top" if pinned else "Keep MouseMe on top of other windows")
@@ -272,23 +306,19 @@ class MainWindow(Gtk.Window):
         cr.stroke()
         return False
 
-    def _qi_check_box_changed(self, _):
-        if self._qi_check_box.get_active():
-            self._gbg_check_box.set_active(False)
-            self._start_button.grab_focus()
+    def _mode_changed(self, button):
+        if button.get_active():
+            for other in self._mode_buttons:
+                if other is not button:
+                    other.set_active(False)
 
-        self._update_field_visibility()
-
-    def _gbg_check_box_changed(self, _):
-        if self._gbg_check_box.get_active():
-            self._qi_check_box.set_active(False)
             self._start_button.grab_focus()
 
         self._update_field_visibility()
 
     def _update_field_visibility(self):
         self.is_gbg_checked = self._gbg_check_box.get_active()
-        show_normal = not self._qi_check_box.get_active() and not self._gbg_check_box.get_active()
+        show_normal = not any(button.get_active() for button in self._mode_buttons)
 
         for field in (self._points_text, self._start_delay_text, self._loop_delay_text, self._delay_text, self._repetitions_text):
             field.set_visible(show_normal)
@@ -301,6 +331,7 @@ class MainWindow(Gtk.Window):
     def _start_clicked(self, _):
         is_gbg = self._gbg_check_box.get_active()
         is_qi = self._qi_check_box.get_active()
+        is_build_menu = self._build_menu_check_box.get_active()
         settings = RunSettings()
 
         def parse(field, minimum=None):
@@ -336,7 +367,7 @@ class MainWindow(Gtk.Window):
                 return
             settings = RunSettings(*values)
 
-        elif not is_qi:
+        elif not is_qi and not is_build_menu:
             values = fields([
                 (self._points_text, 1, "Please enter a number of 1 or more for Number of Points."),
                 (self._start_delay_text, 0, "Please enter a number of 0 or more for Start Delay."),
@@ -350,8 +381,8 @@ class MainWindow(Gtk.Window):
 
         s = self._settings
 
-        # Only normal mode's values are user-entered; GBG uses fixed values and QI uses none
-        if not is_gbg and not is_qi:
+        # Only normal mode's values are user-entered; GBG uses fixed values and QI and Build Menu use none
+        if not is_gbg and not is_qi and not is_build_menu:
             s[SettingsKey.points] = settings.points
             s[SettingsKey.start_delay] = settings.start_delay
             s[SettingsKey.loop_delay] = settings.loop_delay
@@ -360,9 +391,10 @@ class MainWindow(Gtk.Window):
 
         s[SettingsKey.gbg] = is_gbg
         s[SettingsKey.qi] = is_qi
+        s[SettingsKey.build_menu] = is_build_menu
         s.save()
 
-        mode = RunMode.GBG if is_gbg else RunMode.QI if is_qi else RunMode.NORMAL
+        mode = RunMode.GBG if is_gbg else RunMode.QI if is_qi else RunMode.BUILD_MENU if is_build_menu else RunMode.NORMAL
         self._engine.post(self._engine.start, mode, settings)
 
     def _show_message(self, text):

@@ -22,6 +22,11 @@ class Key:
     x = "x"
     y = "y"
     z = "z"
+    one = "1"
+    two = "2"
+    three = "3"
+    four = "4"
+    q = "q"
 
 
 @dataclass(frozen=True)
@@ -108,3 +113,19 @@ class QIConfig:
 
     # A physical click above this line is in the browser tab strip
     tab_strip_max_y = 106
+
+
+# Build Menu mode: each key clicks its own calibrated spot, kept separate from QI's, and Q recalibrates them all
+class BuildMenuConfig:
+    label = "Build Menu"
+
+    # In calibration order: the Build button, the four build menu slots (top left, top right, bottom left, bottom right),
+    # then the Sell, Move and Flat Mode toolbar buttons
+    target_keys = [Key.z, Key.one, Key.two, Key.three, Key.four, Key.s, Key.v, Key.f]
+    calibration_prompts = [
+        "Click Build", "Click Top Left", "Click Top Right", "Click Bottom Left", "Click Bottom Right",
+        "Click Sell", "Click Move", "Click Flat Mode",
+    ]
+
+    calibrate_key = Key.q
+    keys = target_keys + [calibrate_key, Key.x]
