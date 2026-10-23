@@ -115,7 +115,7 @@ class QIConfig:
     tab_strip_max_y = 106
 
 
-# Build Menu mode: each key clicks its own calibrated spot, kept separate from QI's, and Q recalibrates them all
+# Build Menu mode: each key clicks its own calibrated spot, kept separate from QI's; the calibrate button sets them
 class BuildMenuConfig:
     label = "Build Menu"
 
@@ -127,5 +127,4 @@ class BuildMenuConfig:
         "Click Sell", "Click Move", "Click Flat Mode",
     ]
 
-    calibrate_key = Key.q
-    keys = target_keys + [calibrate_key, Key.x]
+    keys = target_keys + [Key.x]

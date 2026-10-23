@@ -71,6 +71,9 @@ class Engine:
         self._qi_active = False
         self._build_menu_active = False
 
+        # Calibrating from the calibrate button, outside any mode; only X is captured, to cancel
+        self._calibration_active = False
+
         # Waiting for a Build Menu calibration click; it resolves to None if calibration is cancelled
         self._pending_calibration_click = None
 
@@ -122,17 +125,7 @@ class Engine:
         self._click_positions.clear()
         self._settings = settings
 
-        self._current_run_id += 1
-        self._set_qi_active(False)
-        self._set_build_menu_active(False)
-        self._recording = False
-        self._close_overlay()
-
-        overlay = self.controller.create_overlay()
-        self.overlay = overlay
-        overlay.show()
-
-        self.controller.minimize()
+        overlay = self._begin_run()
 
         if mode == RunMode.GBG:
             self._click_positions.append(QIConfig.gbg_click)
@@ -161,6 +154,45 @@ class Engine:
 
             self._recording = True
 
+    # Calibrates a mode's spots from the calibrate button: the window minimizes while each spot is clicked in the game,
+    # then comes back. X cancels and keeps the old spots. Only Build Menu can be calibrated so far.
+    def calibrate(self, mode):
+        if mode != RunMode.BUILD_MENU:
+            return
+
+        overlay = self._begin_run()
+        overlay.set(BuildMenuConfig.label, Color.blue)
+
+        self._buffered_qi_key = None
+        self._set_calibration_active(True)
+        self.loop.create_task(self._run_calibration(self._current_run_id, overlay))
+
+    async def _run_calibration(self, run_id, overlay):
+        saved = False
+        try:
+            saved = await self._calibrate_build_menu(overlay)
+        finally:
+            if run_id == self._current_run_id:
+                self._set_calibration_active(False)
+                self._stop_task()
+                self.controller.show_status("Calibration saved" if saved else "Calibration cancelled")
+
+    # Ends whatever was running, shows a fresh overlay and minimizes the window
+    def _begin_run(self):
+        self._current_run_id += 1
+        self._set_qi_active(False)
+        self._set_build_menu_active(False)
+        self._set_calibration_active(False)
+        self._recording = False
+        self._close_overlay()
+
+        overlay = self.controller.create_overlay()
+        self.overlay = overlay
+        overlay.show()
+
+        self.controller.minimize()
+        return overlay
+
     async def _run_qi(self, run_id):
         try:
             await self._keyboard_clicks(run_id)
@@ -183,6 +215,7 @@ class Engine:
         self._release_mouse_input()
         self._set_qi_active(False)
         self._set_build_menu_active(False)
+        self._set_calibration_active(False)
         self._cancel_pending_key()
         self._cancel_calibration()
 
@@ -195,6 +228,11 @@ class Engine:
         if active != self._build_menu_active:
             self._build_menu_active = active
             self.event_tap.grab_keys(BuildMenuConfig.keys if active else [])
+
+    def _set_calibration_active(self, active):
+        if active != self._calibration_active:
+            self._calibration_active = active
+            self.event_tap.grab_keys([Key.x] if active else [])
 
     # X stops QI or Build Menu; the window comes back only if it's pinned on top, so it otherwise stays out of the game's way
     def _stop_task_for_x(self):
@@ -230,17 +268,24 @@ class Engine:
     # MARK: - Event tap
 
     def handle_key_down(self, key):
-        active_keys = QIConfig.keys if self._qi_active else BuildMenuConfig.keys if self._build_menu_active else []
+        if self._qi_active:
+            active_keys = QIConfig.keys
+        elif self._build_menu_active:
+            active_keys = BuildMenuConfig.keys
+        elif self._calibration_active:
+            active_keys = [Key.x]
+        else:
+            active_keys = []
+
         if self.overlay is None or key not in active_keys:
             return
 
-        # While calibrating, Q starts over and X backs out to Build Menu, keeping the saved spots; with nothing saved yet,
-        # X stops the mode instead. The Build Menu loop handles Q and the stop. Other keys are ignored.
+        # While calibrating, X cancels and keeps the old spots (and stops Build Menu mode if it was calibrating first);
+        # other keys are ignored
         if self._pending_calibration_click is not None:
-            if key in (Key.x, BuildMenuConfig.calibrate_key):
+            if key == Key.x:
                 pending, self._pending_calibration_click = self._pending_calibration_click, None
-                if key == BuildMenuConfig.calibrate_key or self.controller.build_menu_targets is None:
-                    self._buffered_qi_key = key
+                self._buffered_qi_key = key
                 if not pending.done():
                     pending.set_result(None)
             return
@@ -259,7 +304,7 @@ class Engine:
         if self.debug:
             print(f"Mouse clicked at: {x}, {y}{' (injected)' if injected else ''}", flush=True)
 
-        # A Build Menu calibration click is only recorded; the pointer grab keeps it from reaching the game
+        # A calibration click is recorded and still reaches the game, so clicking Build really opens the build menu
         if not injected and self._pending_calibration_click is not None:
             pending, self._pending_calibration_click = self._pending_calibration_click, None
             if not pending.done():
@@ -573,7 +618,7 @@ class Engine:
                 return
 
             targets = self.controller.build_menu_targets
-            if targets is None or key == BuildMenuConfig.calibrate_key:
+            if targets is None:
                 await self._calibrate_build_menu(overlay)
                 continue
 
@@ -593,10 +638,10 @@ class Engine:
 
         self._stop_task()
 
-    # Records every spot from the next clicks, which never reach the game. Cancelling keeps the old spots.
+    # Records every spot from the next clicks, which still reach the game, and returns whether they were saved.
+    # Cancelling keeps the old spots.
     async def _calibrate_build_menu(self, overlay):
         targets = []
-        self.event_tap.grab_pointer(True)
 
         try:
             for prompt in BuildMenuConfig.calibration_prompts:
@@ -607,18 +652,15 @@ class Engine:
 
                 if click is None:
                     overlay.set_text(BuildMenuConfig.label)
-                    return
+                    return False
 
                 targets.append(click)
-
-            # Keep the grab a moment longer, so the last click's release goes to MouseMe too
-            await asyncio.sleep(0.3)
         finally:
             self._pending_calibration_click = None
-            self.event_tap.grab_pointer(False)
 
         self.controller.save_build_menu_targets(targets)
         overlay.set_text(BuildMenuConfig.label)
+        return True
 
     # Puts "QI" back after a one-off action's label, unless a newer label or a newer run has taken over by then
     def _revert_to_qi_label_later(self, run_id):

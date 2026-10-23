@@ -76,10 +76,6 @@ class EventTap(threading.Thread):
     def grab_keys(self, names):
         self._send(("keys", frozenset(names)))
 
-    # While grabbed, clicks go to MouseMe instead of the window under the cursor, which still moves as usual
-    def grab_pointer(self, grab):
-        self._send(("pointer", grab))
-
     def _send(self, command):
         self._commands.put(command)
         os.write(self._wake_w, b"\0")
@@ -122,14 +118,6 @@ class EventTap(threading.Thread):
                 kind, value = self._commands.get_nowait()
             except queue.Empty:
                 return
-
-            if kind == "pointer":
-                if value:
-                    mask = x11.ButtonPressMask | x11.ButtonReleaseMask
-                    x11.XGrabPointer(self._display, self._root, False, mask, x11.GrabModeAsync, x11.GrabModeAsync, 0, 0, x11.CurrentTime)
-                else:
-                    x11.XUngrabPointer(self._display, x11.CurrentTime)
-                continue
 
             wanted = {keycode for keycode, name in self._keycodes.items() if name in value}
 

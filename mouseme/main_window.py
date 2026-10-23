@@ -1,7 +1,7 @@
 import math
 
 import cairo
-from gi.repository import Gdk, GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk, Pango
 
 from .engine import RunMode, RunSettings
 from .qi_config import BuildMenuConfig
@@ -39,6 +39,16 @@ def _orbit(degrees):
 _ATOM_ICON = [_orbit(-45), _orbit(45), [(12, 12), (12, 12.01)]]
 
 # The Tabler "swords" icon for GBG
+# The Tabler "crosshair" icon for calibrating: four rounded corners around a plus
+_CROSSHAIR_ICON = [
+    [(4, 8), (4, 6), (4.152, 5.235), (4.586, 4.586), (5.235, 4.152), (6, 4), (8, 4)],
+    [(4, 16), (4, 18), (4.152, 18.765), (4.586, 19.414), (5.235, 19.848), (6, 20), (8, 20)],
+    [(16, 4), (18, 4), (18.765, 4.152), (19.414, 4.586), (19.848, 5.235), (20, 6), (20, 8)],
+    [(16, 20), (18, 20), (18.765, 19.848), (19.414, 19.414), (19.848, 18.765), (20, 18), (20, 16)],
+    [(9, 12), (15, 12)],
+    [(12, 9), (12, 15)],
+]
+
 _SWORDS_ICON = [
     [(21, 3), (21, 8), (10, 17), (6, 21), (3, 18), (7, 14), (16, 3), (21, 3)],
     [(5, 13), (11, 19)],
@@ -94,6 +104,17 @@ class MainWindow(Gtk.Window):
         # QI, GBG and Build Menu exclude each other
         self._mode_buttons = [self._qi_check_box, self._gbg_check_box, self._build_menu_check_box]
         self._pin_button = self._icon_toggle(_PIN_ICON, _PINNED_ICON)
+
+        # Arms calibration: the next mode icon clicked is calibrated instead of turned on or off
+        self._calibrate_button = self._icon_toggle(_CROSSHAIR_ICON, _CROSSHAIR_ICON)
+        self._reverting_mode_button = False
+
+        # Which modes were on when calibration was armed, so they come back when it's disarmed
+        self._armed_mode_states = None
+
+        # A line of short messages along the bottom of the window; a newer message replaces an older one
+        self._status_label = Gtk.Label(xalign=0)
+        self._status_version = 0
 
         self._build_ui()
         self._load_settings()
@@ -190,6 +211,10 @@ class MainWindow(Gtk.Window):
 
         self._pin_button.connect("toggled", self._pin_button_changed)
         self._icon_bar.pack_end(self._pin_button, False, False, 0)
+
+        self._calibrate_button.set_tooltip_text("Calibrate a mode: click this, then the mode's icon")
+        self._calibrate_button.connect("toggled", self._calibrate_button_changed)
+        self._icon_bar.pack_end(self._calibrate_button, False, False, 0)
         grid.attach(self._icon_bar, 0, 0, 2, 1)
 
         rows = [
@@ -219,7 +244,21 @@ class MainWindow(Gtk.Window):
         grid.attach(self._start_button, 0, len(rows) + 1, 2, 1)
         label.connect("size-allocate", self._align_start_button)
 
-        self.add(grid)
+        self._status_label.get_style_context().add_class("dim-label")
+        self._status_label.set_ellipsize(Pango.EllipsizeMode.END)
+
+        # Keep a line's height even when empty, so the window doesn't change size as messages come and go
+        self._status_label.set_size_request(-1, 16)
+        self._status_label.set_margin_start(12)
+        self._status_label.set_margin_end(12)
+        self._status_label.set_margin_top(3)
+        self._status_label.set_margin_bottom(4)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        content.pack_start(grid, False, False, 0)
+        content.pack_start(Gtk.Separator(), False, False, 0)
+        content.pack_start(self._status_label, False, False, 0)
+        self.add(content)
         self.set_default(self._start_button)
         self._start_button.grab_focus()
 
@@ -276,12 +315,14 @@ class MainWindow(Gtk.Window):
         button.connect("toggled", lambda _: area.queue_draw())
         return button
 
-    @staticmethod
-    def _draw_icon(area, cr, button, off_icon, on_icon):
+    def _draw_icon(self, area, cr, button, off_icon, on_icon):
         on = button.get_active()
         style = button.get_style_context()
 
-        if on:
+        # While calibration is armed, the modes that can be calibrated are green
+        if self._armed_mode_states is not None and button in self._calibratable_mode_buttons:
+            color = Gdk.RGBA(0.18, 0.62, 0.26, 1)
+        elif on:
             found, color = style.lookup_color("theme_selected_bg_color")
             if not found:
                 color = Gdk.RGBA(0.21, 0.52, 0.89, 1)
@@ -307,6 +348,17 @@ class MainWindow(Gtk.Window):
         return False
 
     def _mode_changed(self, button):
+        if self._reverting_mode_button:
+            return
+
+        # While calibration is armed, a mode icon picks the mode to calibrate rather than turning it on or off
+        if self._calibrate_button.get_active():
+            self._reverting_mode_button = True
+            button.set_active(not button.get_active())
+            self._reverting_mode_button = False
+            self._calibrate_mode(button)
+            return
+
         if button.get_active():
             for other in self._mode_buttons:
                 if other is not button:
@@ -325,6 +377,69 @@ class MainWindow(Gtk.Window):
 
         for field in (self._points_gbg_text, self._start_delay_gbg_text, self._loop_delay_gbg_text, self._delay_gbg_text, self._repetitions_gbg_text):
             field.set_visible(not show_normal)
+
+    # MARK: - Calibration
+
+    # The modes that can be calibrated so far
+    @property
+    def _calibratable_mode_buttons(self):
+        return [self._build_menu_check_box]
+
+    def _calibrate_button_changed(self, _):
+        if self._calibrate_button.get_active():
+            # Show every mode as off, with the ones that can be calibrated in green, so the mode that's actually on
+            # doesn't look like the one being calibrated. Disarming puts them back as they were.
+            self._armed_mode_states = [button.get_active() for button in self._mode_buttons]
+            self._set_mode_states([False] * len(self._mode_buttons))
+            self._show_status("Pick mode", transient=False)
+        else:
+            states, self._armed_mode_states = self._armed_mode_states, None
+            if states is not None:
+                self._set_mode_states(states)
+            self._show_status("")
+
+        for button in self._mode_buttons:
+            button.queue_draw()
+
+    # Sets the mode icons without running any mode-change logic
+    def _set_mode_states(self, states):
+        self._reverting_mode_button = True
+        for button, active in zip(self._mode_buttons, states):
+            button.set_active(active)
+        self._reverting_mode_button = False
+
+    def _calibrate_mode(self, button):
+        self._calibrate_button.set_active(False)
+
+        if button is not self._build_menu_check_box:
+            # Only Build Menu can be calibrated so far
+            self._show_status("Build only")
+            return
+
+        self._engine.post(self._engine.calibrate, RunMode.BUILD_MENU)
+
+    # MARK: - Status
+
+    # Called from the engine thread
+    def show_status(self, text):
+        GLib.idle_add(self._show_status, text)
+
+    # Shows a message in the status line; a transient one clears itself after a few seconds unless replaced first
+    def _show_status(self, text, transient=True):
+        self._status_label.set_markup(f"<small>{GLib.markup_escape_text(text)}</small>")
+        self._status_version += 1
+
+        if transient and text:
+            version = self._status_version
+
+            def clear():
+                if self._status_version == version:
+                    self._status_label.set_text("")
+                return False
+
+            GLib.timeout_add(3000, clear)
+
+        return False
 
     # MARK: - Start
 

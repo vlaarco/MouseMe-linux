@@ -36,9 +36,6 @@ Mod2Mask = 1 << 4  # Num Lock
 Mod4Mask = 1 << 6  # Super
 
 GrabModeAsync = 1
-CurrentTime = 0
-ButtonPressMask = 1 << 2
-ButtonReleaseMask = 1 << 3
 
 # XInput2
 XIAllDevices = 0
@@ -243,8 +240,6 @@ XStringToKeysym = _fn(xlib, "XStringToKeysym", c_ulong, c_char_p)
 XKeysymToKeycode = _fn(xlib, "XKeysymToKeycode", c_ubyte, Display_p, c_ulong)
 XGrabKey = _fn(xlib, "XGrabKey", c_int, Display_p, c_int, c_uint, Window, Bool, c_int, c_int)
 XUngrabKey = _fn(xlib, "XUngrabKey", c_int, Display_p, c_int, c_uint, Window)
-XGrabPointer = _fn(xlib, "XGrabPointer", c_int, Display_p, Window, Bool, c_uint, c_int, c_int, Window, c_ulong, Time)
-XUngrabPointer = _fn(xlib, "XUngrabPointer", c_int, Display_p, Time)
 XQueryPointer = _fn(
     xlib, "XQueryPointer", Bool,
     Display_p, Window, POINTER(Window), POINTER(Window), POINTER(c_int), POINTER(c_int), POINTER(c_int), POINTER(c_int), POINTER(c_uint))
