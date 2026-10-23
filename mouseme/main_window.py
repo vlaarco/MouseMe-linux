@@ -21,6 +21,14 @@ _PINNED_ICON = [
     [(8, 4), (16, 4)],
 ]
 
+# The Tabler "swords" icon for GBG
+_SWORDS_ICON = [
+    [(21, 3), (21, 8), (10, 17), (6, 21), (3, 18), (7, 14), (16, 3), (21, 3)],
+    [(5, 13), (11, 19)],
+    [(14.32, 17.32), (18, 21), (21, 18), (17.635, 14.635)],
+    [(10, 5.5), (8, 3), (3, 3), (3, 8), (6, 10.5)],
+]
+
 _ICON_SIZE = 18
 
 
@@ -51,13 +59,12 @@ class MainWindow(Gtk.Window):
         self._repetitions_gbg_text = self._entry("500", fixed=True)
 
         self._qi_check_box = Gtk.CheckButton(label="QI")
-        self._gbg_check_box = Gtk.CheckButton(label="GBG")
         self._start_button = Gtk.Button(label="Start")
 
-        # The icon bar along the top of the window; more icons go next to the pin
+        # The icon bar along the top of the window: mode icons on the left, window controls on the right
         self._icon_bar = Gtk.Box(spacing=6)
-        self._pin_button = Gtk.ToggleButton(relief=Gtk.ReliefStyle.NONE)
-        self._pin_icon = Gtk.DrawingArea()
+        self._gbg_check_box = self._icon_toggle(_SWORDS_ICON, _SWORDS_ICON)
+        self._pin_button = self._icon_toggle(_PIN_ICON, _PINNED_ICON)
 
         self._build_ui()
         self._load_settings()
@@ -127,9 +134,9 @@ class MainWindow(Gtk.Window):
     def _build_ui(self):
         grid = Gtk.Grid(column_spacing=8, row_spacing=8, margin=12)
 
-        self._pin_icon.set_size_request(_ICON_SIZE, _ICON_SIZE)
-        self._pin_icon.connect("draw", self._draw_pin_icon)
-        self._pin_button.add(self._pin_icon)
+        self._gbg_check_box.set_tooltip_text("Guild Battlegrounds mode")
+        self._icon_bar.pack_start(self._gbg_check_box, False, False, 0)
+
         self._pin_button.connect("toggled", self._pin_button_changed)
         self._icon_bar.pack_end(self._pin_button, False, False, 0)
         grid.attach(self._icon_bar, 0, 0, 2, 1)
@@ -151,10 +158,7 @@ class MainWindow(Gtk.Window):
             cell.pack_start(gbg_field, True, True, 0)
             grid.attach(cell, 1, i + 1, 1, 1)
 
-        check_boxes = Gtk.Box(spacing=8)
-        check_boxes.pack_start(self._qi_check_box, False, False, 0)
-        check_boxes.pack_start(self._gbg_check_box, False, False, 0)
-        grid.attach(check_boxes, 0, len(rows) + 1, 1, 1)
+        grid.attach(self._qi_check_box, 0, len(rows) + 1, 1, 1)
 
         self._qi_check_box.connect("toggled", self._qi_check_box_changed)
         self._gbg_check_box.connect("toggled", self._gbg_check_box_changed)
@@ -196,13 +200,25 @@ class MainWindow(Gtk.Window):
 
         self.set_keep_above(pinned)
         self._pin_button.set_tooltip_text("Stop keeping MouseMe on top" if pinned else "Keep MouseMe on top of other windows")
-        self._pin_icon.queue_draw()
 
-    def _draw_pin_icon(self, area, cr):
-        pinned = self._pin_button.get_active()
-        style = self._pin_button.get_style_context()
+    # MARK: - Icon bar
 
-        if pinned:
+    # A flat toggle button drawing off_icon while off and on_icon (in the accent color) while on
+    def _icon_toggle(self, off_icon, on_icon):
+        button = Gtk.ToggleButton(relief=Gtk.ReliefStyle.NONE)
+        area = Gtk.DrawingArea()
+        area.set_size_request(_ICON_SIZE, _ICON_SIZE)
+        area.connect("draw", self._draw_icon, button, off_icon, on_icon)
+        button.add(area)
+        button.connect("toggled", lambda _: area.queue_draw())
+        return button
+
+    @staticmethod
+    def _draw_icon(area, cr, button, off_icon, on_icon):
+        on = button.get_active()
+        style = button.get_style_context()
+
+        if on:
             found, color = style.lookup_color("theme_selected_bg_color")
             if not found:
                 color = Gdk.RGBA(0.21, 0.52, 0.89, 1)
@@ -216,7 +232,7 @@ class MainWindow(Gtk.Window):
         cr.set_line_join(cairo.LINE_JOIN_ROUND)
         cr.set_source_rgba(color.red, color.green, color.blue, color.alpha)
 
-        for line in _PINNED_ICON if pinned else _PIN_ICON:
+        for line in on_icon if on else off_icon:
             cr.move_to(*line[0])
             for point in line[1:]:
                 cr.line_to(*point)
