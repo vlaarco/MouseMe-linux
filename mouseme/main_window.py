@@ -1,3 +1,5 @@
+import math
+
 import cairo
 from gi.repository import Gdk, GLib, Gtk
 
@@ -20,6 +22,20 @@ _PINNED_ICON = [
     [(12, 16), (12, 21)],
     [(8, 4), (16, 4)],
 ]
+
+# The Tabler "atom" icon for QI: two orbits tilted either way around a center dot
+def _orbit(degrees):
+    # An orbit 23.6 wide and 9.4 tall around the center, tilted by the given angle; sized so the atom spans 3 to 21 like the other icons
+    tilt = math.radians(degrees)
+    points = []
+    for i in range(49):
+        t = 2 * math.pi * i / 48
+        x, y = 11.8 * math.cos(t), 4.7 * math.sin(t)
+        points.append((12 + x * math.cos(tilt) - y * math.sin(tilt), 12 + x * math.sin(tilt) + y * math.cos(tilt)))
+    return points
+
+
+_ATOM_ICON = [_orbit(-45), _orbit(45), [(12, 12), (12, 12.01)]]
 
 # The Tabler "swords" icon for GBG
 _SWORDS_ICON = [
@@ -58,11 +74,11 @@ class MainWindow(Gtk.Window):
         self._delay_gbg_text = self._entry("100", fixed=True)
         self._repetitions_gbg_text = self._entry("500", fixed=True)
 
-        self._qi_check_box = Gtk.CheckButton(label="QI")
         self._start_button = Gtk.Button(label="Start")
 
         # The icon bar along the top of the window: mode icons on the left, window controls on the right
         self._icon_bar = Gtk.Box(spacing=6)
+        self._qi_check_box = self._icon_toggle(_ATOM_ICON, _ATOM_ICON)
         self._gbg_check_box = self._icon_toggle(_SWORDS_ICON, _SWORDS_ICON)
         self._pin_button = self._icon_toggle(_PIN_ICON, _PINNED_ICON)
 
@@ -134,6 +150,9 @@ class MainWindow(Gtk.Window):
     def _build_ui(self):
         grid = Gtk.Grid(column_spacing=8, row_spacing=8, margin=12)
 
+        self._qi_check_box.set_tooltip_text("Quantum Incursions mode")
+        self._icon_bar.pack_start(self._qi_check_box, False, False, 0)
+
         self._gbg_check_box.set_tooltip_text("Guild Battlegrounds mode")
         self._icon_bar.pack_start(self._gbg_check_box, False, False, 0)
 
@@ -158,7 +177,6 @@ class MainWindow(Gtk.Window):
             cell.pack_start(gbg_field, True, True, 0)
             grid.attach(cell, 1, i + 1, 1, 1)
 
-        grid.attach(self._qi_check_box, 0, len(rows) + 1, 1, 1)
 
         self._qi_check_box.connect("toggled", self._qi_check_box_changed)
         self._gbg_check_box.connect("toggled", self._gbg_check_box_changed)
