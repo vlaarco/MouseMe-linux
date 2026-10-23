@@ -13,6 +13,7 @@ class SettingsKey:
     repetitions = "Repetitions"
     gbg = "GBG"
     qi = "QI"
+    stay_on_top = "StayOnTop"
     window_position = "WindowPosition"
 
     defaults = {
@@ -23,6 +24,7 @@ class SettingsKey:
         repetitions: 1,
         gbg: False,
         qi: False,
+        stay_on_top: False,
         window_position: None,
     }
 

@@ -1,3 +1,4 @@
+import cairo
 from gi.repository import Gdk, GLib, Gtk
 
 from .engine import RunMode, RunSettings
@@ -6,6 +7,21 @@ from .settings import SettingsKey
 
 # Window position is saved this long after the window stops moving, not on every pixel of a drag
 _SAVE_POSITION_DELAY_MS = 500
+
+# The Tabler "pin" (off, tilted) and "pinned" (on, upright) icons, as lines on a 24 x 24 grid
+_PIN_ICON = [
+    [(15, 4.5), (11, 8.5), (7, 10), (5.5, 11.5), (12.5, 18.5), (14, 17), (15.5, 13), (19.5, 9)],
+    [(9, 15), (4.5, 19.5)],
+    [(14.5, 4), (20, 9.5)],
+]
+
+_PINNED_ICON = [
+    [(9, 4), (9, 10), (7, 14), (7, 16), (17, 16), (17, 14), (15, 10), (15, 4)],
+    [(12, 16), (12, 21)],
+    [(8, 4), (16, 4)],
+]
+
+_ICON_SIZE = 18
 
 
 class MainWindow(Gtk.Window):
@@ -37,6 +53,11 @@ class MainWindow(Gtk.Window):
         self._qi_check_box = Gtk.CheckButton(label="QI")
         self._gbg_check_box = Gtk.CheckButton(label="GBG")
         self._start_button = Gtk.Button(label="Start")
+
+        # The icon bar along the top of the window; more icons go next to the pin
+        self._icon_bar = Gtk.Box(spacing=6)
+        self._pin_button = Gtk.ToggleButton(relief=Gtk.ReliefStyle.NONE)
+        self._pin_icon = Gtk.DrawingArea()
 
         self._build_ui()
         self._load_settings()
@@ -106,6 +127,13 @@ class MainWindow(Gtk.Window):
     def _build_ui(self):
         grid = Gtk.Grid(column_spacing=8, row_spacing=8, margin=12)
 
+        self._pin_icon.set_size_request(_ICON_SIZE, _ICON_SIZE)
+        self._pin_icon.connect("draw", self._draw_pin_icon)
+        self._pin_button.add(self._pin_icon)
+        self._pin_button.connect("toggled", self._pin_button_changed)
+        self._icon_bar.pack_end(self._pin_button, False, False, 0)
+        grid.attach(self._icon_bar, 0, 0, 2, 1)
+
         rows = [
             ("Number of Points", self._points_text, self._points_gbg_text),
             ("Start Delay (ms)", self._start_delay_text, self._start_delay_gbg_text),
@@ -116,24 +144,24 @@ class MainWindow(Gtk.Window):
 
         for i, (title, field, gbg_field) in enumerate(rows):
             label = Gtk.Label(label=title, xalign=0)
-            grid.attach(label, 0, i, 1, 1)
+            grid.attach(label, 0, i + 1, 1, 1)
 
             cell = Gtk.Box()
             cell.pack_start(field, True, True, 0)
             cell.pack_start(gbg_field, True, True, 0)
-            grid.attach(cell, 1, i, 1, 1)
+            grid.attach(cell, 1, i + 1, 1, 1)
 
         check_boxes = Gtk.Box(spacing=8)
         check_boxes.pack_start(self._qi_check_box, False, False, 0)
         check_boxes.pack_start(self._gbg_check_box, False, False, 0)
-        grid.attach(check_boxes, 0, len(rows), 1, 1)
+        grid.attach(check_boxes, 0, len(rows) + 1, 1, 1)
 
         self._qi_check_box.connect("toggled", self._qi_check_box_changed)
         self._gbg_check_box.connect("toggled", self._gbg_check_box_changed)
 
         self._start_button.set_can_default(True)
         self._start_button.connect("clicked", self._start_clicked)
-        grid.attach(self._start_button, 1, len(rows), 1, 1)
+        grid.attach(self._start_button, 1, len(rows) + 1, 1, 1)
 
         self.add(grid)
         self.set_default(self._start_button)
@@ -151,6 +179,50 @@ class MainWindow(Gtk.Window):
         self._gbg_check_box.set_active(bool(s[SettingsKey.gbg]))
         self._qi_check_box.set_active(bool(s[SettingsKey.qi]) and not self._gbg_check_box.get_active())
         self._update_field_visibility()
+
+        self._pin_button.set_active(bool(s[SettingsKey.stay_on_top]))
+        self._apply_stay_on_top()
+
+    # MARK: - Stay on top
+
+    def _pin_button_changed(self, _):
+        self._settings[SettingsKey.stay_on_top] = self._pin_button.get_active()
+        self._settings.save()
+        self._apply_stay_on_top()
+
+    # Stays above every other window, including after a run minimizes and restores it, until the pin is clicked again
+    def _apply_stay_on_top(self):
+        pinned = self._pin_button.get_active()
+
+        self.set_keep_above(pinned)
+        self._pin_button.set_tooltip_text("Stop keeping MouseMe on top" if pinned else "Keep MouseMe on top of other windows")
+        self._pin_icon.queue_draw()
+
+    def _draw_pin_icon(self, area, cr):
+        pinned = self._pin_button.get_active()
+        style = self._pin_button.get_style_context()
+
+        if pinned:
+            found, color = style.lookup_color("theme_selected_bg_color")
+            if not found:
+                color = Gdk.RGBA(0.21, 0.52, 0.89, 1)
+        else:
+            color = style.get_color(style.get_state())
+
+        scale = min(area.get_allocated_width(), area.get_allocated_height()) / 24
+        cr.scale(scale, scale)
+        cr.set_line_width(2)
+        cr.set_line_cap(cairo.LINE_CAP_ROUND)
+        cr.set_line_join(cairo.LINE_JOIN_ROUND)
+        cr.set_source_rgba(color.red, color.green, color.blue, color.alpha)
+
+        for line in _PINNED_ICON if pinned else _PIN_ICON:
+            cr.move_to(*line[0])
+            for point in line[1:]:
+                cr.line_to(*point)
+
+        cr.stroke()
+        return False
 
     def _qi_check_box_changed(self, _):
         if self._qi_check_box.get_active():
