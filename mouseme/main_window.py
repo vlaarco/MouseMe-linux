@@ -183,11 +183,22 @@ class MainWindow(Gtk.Window):
 
         self._start_button.set_can_default(True)
         self._start_button.connect("clicked", self._start_clicked)
-        grid.attach(self._start_button, 1, len(rows) + 1, 1, 1)
+        # Spans both columns, from where the labels' text starts to the fields' right edge
+        grid.attach(self._start_button, 0, len(rows) + 1, 2, 1)
+        label.connect("size-allocate", self._align_start_button)
 
         self.add(grid)
         self.set_default(self._start_button)
         self._start_button.grab_focus()
+
+    # Labels draw their text slightly inside their edge, so indent the Start button by however far that is
+    def _align_start_button(self, label, _allocation):
+        offset_x, _ = label.get_layout_offsets()
+        ink, _ = label.get_layout().get_pixel_extents()
+        text_left = max(offset_x - label.get_allocation().x + ink.x, 0)
+
+        if self._start_button.get_margin_start() != text_left:
+            self._start_button.set_margin_start(text_left)
 
     def _load_settings(self):
         s = self._settings
@@ -243,8 +254,11 @@ class MainWindow(Gtk.Window):
         else:
             color = style.get_color(style.get_state())
 
-        scale = min(area.get_allocated_width(), area.get_allocated_height()) / 24
-        cr.scale(scale, scale)
+        # GTK can give the area more room than the icon needs, so draw it square and centered rather than in the top-left
+        width, height = area.get_allocated_width(), area.get_allocated_height()
+        size = min(width, height)
+        cr.translate((width - size) / 2, (height - size) / 2)
+        cr.scale(size / 24, size / 24)
         cr.set_line_width(2)
         cr.set_line_cap(cairo.LINE_CAP_ROUND)
         cr.set_line_join(cairo.LINE_JOIN_ROUND)
