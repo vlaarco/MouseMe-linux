@@ -192,8 +192,9 @@ class MainWindow(Gtk.Window):
         return False
 
     def minimize(self):
-        # Iconifying hands focus back to the window underneath, which is the game
-        GLib.idle_add(self.iconify)
+        # Iconifying hands focus back to the window underneath, which is the game; a window pinned on top stays visible
+        if not self.is_stay_on_top:
+            GLib.idle_add(self.iconify)
 
     def restore(self):
         GLib.idle_add(self._restore)

@@ -359,7 +359,8 @@ class Engine:
 
         self._recording = False
 
-        if not self.controller.is_minimized:
+        # A restored window means the run was cancelled; a pinned window was never minimized
+        if not self.controller.is_minimized and not self.controller.is_stay_on_top:
             self._close_overlay()
         else:
             overlay.set("", Color.red)
