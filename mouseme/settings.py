@@ -16,6 +16,13 @@ class SettingsKey:
     stay_on_top = "StayOnTop"
     build_menu = "BuildMenu"
     build_menu_targets = "BuildMenuTargets"
+    army = "Army"
+    army_units = "ArmyUnits"
+    army_delay = "ArmyDelay"
+    army_close_delay = "ArmyCloseDelay"
+    army_click_delay = "ArmyClickDelay"
+    army_repetitions = "ArmyRepetitions"
+    army_targets = "ArmyTargets"
     window_position = "WindowPosition"
 
     defaults = {
@@ -29,6 +36,13 @@ class SettingsKey:
         stay_on_top: False,
         build_menu: False,
         build_menu_targets: None,
+        army: False,
+        army_units: 20,
+        army_delay: 1500,
+        army_close_delay: 1500,
+        army_click_delay: 350,
+        army_repetitions: 1,
+        army_targets: None,
         window_position: None,
     }
 

@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 
 from .mouse import Mouse
-from .qi_config import BuildMenuConfig, Key, QIConfig
+from .qi_config import ArmyConfig, BuildMenuConfig, Key, QIConfig
 
 
 @dataclass
@@ -23,6 +23,7 @@ class RunMode(enum.Enum):
     GBG = "gbg"
     QI = "qi"
     BUILD_MENU = "build_menu"
+    ARMY = "army"
 
 
 class Color:
@@ -149,6 +150,11 @@ class Engine:
             self._set_build_menu_active(True)
             self.loop.create_task(self._run_build_menu(self._current_run_id))
 
+        elif mode == RunMode.ARMY:
+            # Counts down every unit left across all repetitions
+            overlay.set(str(settings.points * settings.repetitions), Color.red)
+            self.loop.create_task(self._run_army(self._current_run_id, settings))
+
         else:
             overlay.set(str(settings.points), Color.green)
 
@@ -157,25 +163,31 @@ class Engine:
     # Calibrates a mode's spots from the calibrate button: the window minimizes while each spot is clicked in the game,
     # then comes back. X cancels and keeps the old spots. Only Build Menu can be calibrated so far.
     def calibrate(self, mode):
-        if mode != RunMode.BUILD_MENU:
+        if mode == RunMode.BUILD_MENU:
+            prompts, save = BuildMenuConfig.calibration_prompts, self.controller.save_build_menu_targets
+        elif mode == RunMode.ARMY:
+            prompts, save = ArmyConfig.calibration_prompts, self.controller.save_army_targets
+        else:
             return
 
         overlay = self._begin_run()
-        overlay.set(BuildMenuConfig.label, Color.blue)
+        overlay.set("", Color.blue)
 
         self._buffered_qi_key = None
         self._set_calibration_active(True)
-        self.loop.create_task(self._run_calibration(self._current_run_id, overlay))
+        self.loop.create_task(self._run_calibration(self._current_run_id, overlay, prompts, save))
 
-    async def _run_calibration(self, run_id, overlay):
-        saved = False
+    async def _run_calibration(self, run_id, overlay, prompts, save):
+        targets = None
         try:
-            saved = await self._calibrate_build_menu(overlay)
+            targets = await self._calibrate_targets(prompts, overlay)
+            if targets is not None:
+                save(targets)
         finally:
             if run_id == self._current_run_id:
                 self._set_calibration_active(False)
                 self._stop_task()
-                self.controller.show_status("Calibration saved" if saved else "Calibration cancelled")
+                self.controller.show_status("Calibration saved" if targets is not None else "Calibration cancelled")
 
     # Ends whatever was running, shows a fresh overlay and minimizes the window
     def _begin_run(self):
@@ -638,29 +650,80 @@ class Engine:
 
         self._stop_task()
 
-    # Records every spot from the next clicks, which still reach the game, and returns whether they were saved.
-    # Cancelling keeps the old spots.
+    # Calibrates Build Menu's spots within a Build Menu run. Cancelling keeps the old spots.
     async def _calibrate_build_menu(self, overlay):
+        targets = await self._calibrate_targets(BuildMenuConfig.calibration_prompts, overlay)
+        if targets is not None:
+            self.controller.save_build_menu_targets(targets)
+
+        overlay.set_text(BuildMenuConfig.label)
+
+    # Records one spot per prompt from the next clicks, which still reach the game; None if X cancels first
+    async def _calibrate_targets(self, prompts, overlay):
         targets = []
 
         try:
-            for prompt in BuildMenuConfig.calibration_prompts:
+            for prompt in prompts:
                 overlay.set_text(prompt)
 
                 self._pending_calibration_click = self.loop.create_future()
                 click = await self._pending_calibration_click
 
                 if click is None:
-                    overlay.set_text(BuildMenuConfig.label)
-                    return False
+                    return None
 
                 targets.append(click)
         finally:
             self._pending_calibration_click = None
 
-        self.controller.save_build_menu_targets(targets)
-        overlay.set_text(BuildMenuConfig.label)
-        return True
+        return targets
+
+    # MARK: - Army
+
+    # After the start delay, each repetition clicks Army and waits Army Delay, clicks Delete Unit, clicks Unit then
+    # Delete Confirm once per unit, then clicks Close and waits Close Delay; every other click is followed by Delay.
+    # Moving the mouse stops it, as in normal mode. In Army mode, points is the number of units, start_delay is
+    # Army Delay and loop_delay is Close Delay.
+    async def _run_army(self, run_id, settings):
+        # A newer start owns the overlay; exit without touching it
+        def is_stale():
+            return run_id != self._current_run_id
+
+        targets = self.controller.army_targets
+        if targets is None:
+            self._stop_task()
+            return
+
+        await self._sleep(ArmyConfig.start_delay_ms)
+        start_position = self.mouse.location
+
+        # Clicks a spot, then waits; False once the run has been cancelled, replaced or the mouse was moved
+        async def click(target, wait):
+            if is_stale() or self.overlay is None or self._user_moved_mouse(start_position, targets):
+                return False
+
+            await self._human_click(targets[target], settings.delay, False)
+            await self._sleep(wait)
+            return not is_stale() and self.overlay is not None
+
+        for repetition in range(max(settings.repetitions, 0)):
+            if not (await click(ArmyConfig.ARMY, settings.start_delay) and await click(ArmyConfig.DELETE_UNIT, settings.delay)):
+                break
+
+            stopped = False
+            for unit in range(max(settings.points, 0)):
+                if self.overlay is not None:
+                    self.overlay.set_text(str((settings.repetitions - repetition) * settings.points - unit))
+
+                if not (await click(ArmyConfig.UNIT, settings.delay) and await click(ArmyConfig.DELETE_CONFIRM, settings.delay)):
+                    stopped = True
+                    break
+
+            if stopped or not await click(ArmyConfig.CLOSE, settings.loop_delay):
+                break
+
+        if not is_stale():
+            self._stop_task()
 
     # Puts "QI" back after a one-off action's label, unless a newer label or a newer run has taken over by then
     def _revert_to_qi_label_later(self, run_id):

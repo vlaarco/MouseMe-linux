@@ -4,7 +4,7 @@ import cairo
 from gi.repository import Gdk, GLib, Gtk, Pango
 
 from .engine import RunMode, RunSettings
-from .qi_config import BuildMenuConfig
+from .qi_config import ArmyConfig, BuildMenuConfig
 from .overlay import OverlayPanel
 from .settings import SettingsKey
 
@@ -57,6 +57,20 @@ _SWORDS_ICON = [
 ]
 
 # The Tabler "hammer" icon for Build Menu, with its rounded ends approximated
+# A Corinthian helmet for Army, drawn filled: a flat-topped skull with straight sides, narrow eye slits either side of a
+# straight nose guard, and cheek guards that pinch in, flare out and come to points beside the open mouth
+_HELMET_ICON = [[
+    (9.8, 22), (9.8, 12.4), (5.7, 10.8), (5.4, 10), (6, 8.9), (11, 10), (11, 14.2), (13, 14.2),
+    (13, 10), (18, 8.9), (18.6, 10), (18.3, 10.8), (14.2, 12.4), (14.2, 22), (15.13, 21.49), (16, 20.91),
+    (16.8, 20.25), (17.53, 19.51), (18.2, 18.69), (18.8, 17.8), (18.76, 17.15), (18.69, 16.53), (18.6, 15.95), (18.49, 15.4),
+    (18.36, 14.88), (18.2, 14.4), (18.69, 14.07), (19.09, 13.74), (19.4, 13.43), (19.62, 13.11), (19.76, 12.8), (19.8, 12.5),
+    (19.8, 9), (19.71, 8.05), (19.45, 7.23), (19.02, 6.53), (18.44, 5.95), (17.7, 5.47), (16.82, 5.1), (15.8, 4.83),
+    (14.65, 4.64), (13.38, 4.53), (12, 4.5), (10.62, 4.53), (9.35, 4.64), (8.2, 4.83), (7.18, 5.1), (6.3, 5.47),
+    (5.56, 5.95), (4.98, 6.53), (4.55, 7.23), (4.29, 8.05), (4.2, 9), (4.2, 12.5), (4.24, 12.8), (4.38, 13.11),
+    (4.6, 13.42), (4.91, 13.74), (5.31, 14.07), (5.8, 14.4), (5.64, 14.88), (5.51, 15.4), (5.4, 15.95), (5.31, 16.53),
+    (5.24, 17.15), (5.2, 17.8), (5.8, 18.69), (6.47, 19.51), (7.2, 20.25), (8, 20.91), (8.87, 21.49),
+]]
+
 _HAMMER_ICON = [
     [(11.414, 10), (4.031, 17.418), (3.4, 18.9), (4.031, 20.385), (5.52, 21), (7.007, 20.385), (14.414, 13)],
     [(18.121, 15.293), (20.707, 12.707), (21, 12), (20.707, 11.293), (13.121, 3.707), (12.414, 3.414), (11.707, 3.707),
@@ -100,9 +114,17 @@ class MainWindow(Gtk.Window):
         self._qi_check_box = self._icon_toggle(_ATOM_ICON, _ATOM_ICON)
         self._gbg_check_box = self._icon_toggle(_SWORDS_ICON, _SWORDS_ICON)
         self._build_menu_check_box = self._icon_toggle(_HAMMER_ICON, _HAMMER_ICON)
+        self._army_check_box = self._icon_toggle(_HELMET_ICON, _HELMET_ICON, filled=True)
 
         # QI, GBG and Build Menu exclude each other
-        self._mode_buttons = [self._qi_check_box, self._gbg_check_box, self._build_menu_check_box]
+        self._mode_buttons = [self._qi_check_box, self._gbg_check_box, self._build_menu_check_box, self._army_check_box]
+
+        # Army mode shows its own values in the editable fields, under three different labels; the set not shown is kept here
+        self._points_label = Gtk.Label(label="Number of Points", xalign=0)
+        self._start_delay_label = Gtk.Label(label="Start Delay (ms)", xalign=0)
+        self._loop_delay_label = Gtk.Label(label="Loop Delay (ms)", xalign=0)
+        self._showing_army_fields = False
+        self._hidden_field_values = []
         self._pin_button = self._icon_toggle(_PIN_ICON, _PINNED_ICON)
 
         # Arms calibration: the next mode icon clicked is calibrated instead of turned on or off
@@ -139,19 +161,33 @@ class MainWindow(Gtk.Window):
     def create_overlay(self):
         return OverlayPanel()
 
-    # The calibrated Build Menu spots, or None until all of them have been calibrated
+    # The calibrated Build Menu and Army spots, or None until all of them have been calibrated
     @property
     def build_menu_targets(self):
-        saved = self._settings[SettingsKey.build_menu_targets]
-        if isinstance(saved, list) and len(saved) == len(BuildMenuConfig.target_keys) and all(isinstance(p, list) and len(p) == 2 for p in saved):
+        return self._saved_spots(SettingsKey.build_menu_targets, len(BuildMenuConfig.target_keys))
+
+    def save_build_menu_targets(self, targets):
+        self._save_spots(SettingsKey.build_menu_targets, targets)
+
+    @property
+    def army_targets(self):
+        return self._saved_spots(SettingsKey.army_targets, len(ArmyConfig.calibration_prompts))
+
+    def save_army_targets(self, targets):
+        self._save_spots(SettingsKey.army_targets, targets)
+
+    def _saved_spots(self, key, count):
+        saved = self._settings[key]
+        if isinstance(saved, list) and len(saved) == count and all(isinstance(p, list) and len(p) == 2 for p in saved):
             return [tuple(p) for p in saved]
         return None
 
-    def save_build_menu_targets(self, targets):
-        GLib.idle_add(self._save_build_menu_targets, [list(p) for p in targets])
+    # Updated straight away, so the engine sees the new spots, then written to disk on the GTK thread
+    def _save_spots(self, key, spots):
+        self._settings[key] = [list(p) for p in spots]
+        GLib.idle_add(self._save_settings)
 
-    def _save_build_menu_targets(self, targets):
-        self._settings[SettingsKey.build_menu_targets] = targets
+    def _save_settings(self):
         self._settings.save()
         return False
 
@@ -209,6 +245,9 @@ class MainWindow(Gtk.Window):
         self._build_menu_check_box.set_tooltip_text("Build Menu mode")
         self._icon_bar.pack_start(self._build_menu_check_box, False, False, 0)
 
+        self._army_check_box.set_tooltip_text("Army mode")
+        self._icon_bar.pack_start(self._army_check_box, False, False, 0)
+
         self._pin_button.connect("toggled", self._pin_button_changed)
         self._icon_bar.pack_end(self._pin_button, False, False, 0)
 
@@ -218,15 +257,14 @@ class MainWindow(Gtk.Window):
         grid.attach(self._icon_bar, 0, 0, 2, 1)
 
         rows = [
-            ("Number of Points", self._points_text, self._points_gbg_text),
-            ("Start Delay (ms)", self._start_delay_text, self._start_delay_gbg_text),
-            ("Loop Delay (ms)", self._loop_delay_text, self._loop_delay_gbg_text),
-            ("Delay (ms)", self._delay_text, self._delay_gbg_text),
-            ("Repetitions", self._repetitions_text, self._repetitions_gbg_text),
+            (self._points_label, self._points_text, self._points_gbg_text),
+            (self._start_delay_label, self._start_delay_text, self._start_delay_gbg_text),
+            (self._loop_delay_label, self._loop_delay_text, self._loop_delay_gbg_text),
+            (Gtk.Label(label="Delay (ms)", xalign=0), self._delay_text, self._delay_gbg_text),
+            (Gtk.Label(label="Repetitions", xalign=0), self._repetitions_text, self._repetitions_gbg_text),
         ]
 
-        for i, (title, field, gbg_field) in enumerate(rows):
-            label = Gtk.Label(label=title, xalign=0)
+        for i, (label, field, gbg_field) in enumerate(rows):
             grid.attach(label, 0, i + 1, 1, 1)
 
             cell = Gtk.Box()
@@ -275,6 +313,10 @@ class MainWindow(Gtk.Window):
         s = self._settings
 
         self._points_text.set_text(str(s[SettingsKey.points]))
+        self._hidden_field_values = [
+            str(s[key]) for key in (SettingsKey.army_units, SettingsKey.army_delay, SettingsKey.army_close_delay,
+                                    SettingsKey.army_click_delay, SettingsKey.army_repetitions)
+        ]
         self._start_delay_text.set_text(str(s[SettingsKey.start_delay]))
         self._loop_delay_text.set_text(str(s[SettingsKey.loop_delay]))
         self._delay_text.set_text(str(s[SettingsKey.delay]))
@@ -283,6 +325,7 @@ class MainWindow(Gtk.Window):
         self._gbg_check_box.set_active(bool(s[SettingsKey.gbg]))
         self._qi_check_box.set_active(bool(s[SettingsKey.qi]) and not self._gbg_check_box.get_active())
         self._build_menu_check_box.set_active(bool(s[SettingsKey.build_menu]) and not self._qi_check_box.get_active() and not self._gbg_check_box.get_active())
+        self._army_check_box.set_active(bool(s[SettingsKey.army]) and not any(b.get_active() for b in self._mode_buttons[:3]))
         self._update_field_visibility()
 
         self._pin_button.set_active(bool(s[SettingsKey.stay_on_top]))
@@ -305,17 +348,17 @@ class MainWindow(Gtk.Window):
 
     # MARK: - Icon bar
 
-    # A flat toggle button drawing off_icon while off and on_icon (in the accent color) while on
-    def _icon_toggle(self, off_icon, on_icon):
+    # A flat toggle button drawing off_icon while off and on_icon (in the accent color) while on; a filled icon is one closed shape
+    def _icon_toggle(self, off_icon, on_icon, filled=False):
         button = Gtk.ToggleButton(relief=Gtk.ReliefStyle.NONE)
         area = Gtk.DrawingArea()
         area.set_size_request(_ICON_SIZE, _ICON_SIZE)
-        area.connect("draw", self._draw_icon, button, off_icon, on_icon)
+        area.connect("draw", self._draw_icon, button, off_icon, on_icon, filled)
         button.add(area)
         button.connect("toggled", lambda _: area.queue_draw())
         return button
 
-    def _draw_icon(self, area, cr, button, off_icon, on_icon):
+    def _draw_icon(self, area, cr, button, off_icon, on_icon, filled):
         on = button.get_active()
         style = button.get_style_context()
 
@@ -344,7 +387,11 @@ class MainWindow(Gtk.Window):
             for point in line[1:]:
                 cr.line_to(*point)
 
-        cr.stroke()
+        if filled:
+            cr.close_path()
+            cr.fill()
+        else:
+            cr.stroke()
         return False
 
     def _mode_changed(self, button):
@@ -370,7 +417,10 @@ class MainWindow(Gtk.Window):
 
     def _update_field_visibility(self):
         self.is_gbg_checked = self._gbg_check_box.get_active()
-        show_normal = not any(button.get_active() for button in self._mode_buttons)
+        self._swap_army_fields()
+
+        # Army mode uses the editable fields too; QI, GBG and Build Menu show GBG's fixed values instead
+        show_normal = not any(button.get_active() for button in (self._qi_check_box, self._gbg_check_box, self._build_menu_check_box))
 
         for field in (self._points_text, self._start_delay_text, self._loop_delay_text, self._delay_text, self._repetitions_text):
             field.set_visible(show_normal)
@@ -378,12 +428,29 @@ class MainWindow(Gtk.Window):
         for field in (self._points_gbg_text, self._start_delay_gbg_text, self._loop_delay_gbg_text, self._delay_gbg_text, self._repetitions_gbg_text):
             field.set_visible(not show_normal)
 
+    # Shows Army's values and labels in the editable fields while Army mode is on, and normal mode's otherwise
+    def _swap_army_fields(self):
+        is_army = self._army_check_box.get_active()
+        if is_army == self._showing_army_fields:
+            return
+
+        fields = (self._points_text, self._start_delay_text, self._loop_delay_text, self._delay_text, self._repetitions_text)
+        shown_values = [field.get_text() for field in fields]
+        for field, value in zip(fields, self._hidden_field_values):
+            field.set_text(value)
+
+        self._hidden_field_values = shown_values
+        self._showing_army_fields = is_army
+        self._points_label.set_text("Number of Units" if is_army else "Number of Points")
+        self._start_delay_label.set_text("Army Delay (ms)" if is_army else "Start Delay (ms)")
+        self._loop_delay_label.set_text("Close Delay (ms)" if is_army else "Loop Delay (ms)")
+
     # MARK: - Calibration
 
     # The modes that can be calibrated so far
     @property
     def _calibratable_mode_buttons(self):
-        return [self._build_menu_check_box]
+        return [self._build_menu_check_box, self._army_check_box]
 
     def _calibrate_button_changed(self, _):
         if self._calibrate_button.get_active():
@@ -411,12 +478,12 @@ class MainWindow(Gtk.Window):
     def _calibrate_mode(self, button):
         self._calibrate_button.set_active(False)
 
-        if button is not self._build_menu_check_box:
-            # Only Build Menu can be calibrated so far
-            self._show_status("Build only")
+        if button not in self._calibratable_mode_buttons:
+            # Only Build Menu and Army can be calibrated so far
+            self._show_status("Build or Army only")
             return
 
-        self._engine.post(self._engine.calibrate, RunMode.BUILD_MENU)
+        self._engine.post(self._engine.calibrate, RunMode.ARMY if button is self._army_check_box else RunMode.BUILD_MENU)
 
     # MARK: - Status
 
@@ -447,6 +514,7 @@ class MainWindow(Gtk.Window):
         is_gbg = self._gbg_check_box.get_active()
         is_qi = self._qi_check_box.get_active()
         is_build_menu = self._build_menu_check_box.get_active()
+        is_army = self._army_check_box.get_active()
         settings = RunSettings()
 
         def parse(field, minimum=None):
@@ -482,6 +550,19 @@ class MainWindow(Gtk.Window):
                 return
             settings = RunSettings(*values)
 
+        elif is_army:
+            values = fields([
+                (self._points_text, 1, "Please enter a number of 1 or more for Number of Units."),
+                (self._start_delay_text, 0, "Please enter a number of 0 or more for Army Delay."),
+                (self._loop_delay_text, 0, "Please enter a number of 0 or more for Close Delay."),
+                (self._delay_text, 0, "Please enter a number of 0 or more for Delay."),
+                (self._repetitions_text, 1, "Please enter a number of 1 or more for Repetitions."),
+            ])
+            if values is None:
+                return
+            # In Army mode, points is the number of units, start_delay is Army Delay and loop_delay is Close Delay
+            settings = RunSettings(*values)
+
         elif not is_qi and not is_build_menu:
             values = fields([
                 (self._points_text, 1, "Please enter a number of 1 or more for Number of Points."),
@@ -496,8 +577,14 @@ class MainWindow(Gtk.Window):
 
         s = self._settings
 
-        # Only normal mode's values are user-entered; GBG uses fixed values and QI and Build Menu use none
-        if not is_gbg and not is_qi and not is_build_menu:
+        # Normal and Army modes each save their own values; GBG uses fixed values and QI and Build Menu use none
+        if is_army:
+            s[SettingsKey.army_units] = settings.points
+            s[SettingsKey.army_delay] = settings.start_delay
+            s[SettingsKey.army_close_delay] = settings.loop_delay
+            s[SettingsKey.army_click_delay] = settings.delay
+            s[SettingsKey.army_repetitions] = settings.repetitions
+        elif not is_gbg and not is_qi and not is_build_menu:
             s[SettingsKey.points] = settings.points
             s[SettingsKey.start_delay] = settings.start_delay
             s[SettingsKey.loop_delay] = settings.loop_delay
@@ -507,9 +594,15 @@ class MainWindow(Gtk.Window):
         s[SettingsKey.gbg] = is_gbg
         s[SettingsKey.qi] = is_qi
         s[SettingsKey.build_menu] = is_build_menu
+        s[SettingsKey.army] = is_army
         s.save()
 
-        mode = RunMode.GBG if is_gbg else RunMode.QI if is_qi else RunMode.BUILD_MENU if is_build_menu else RunMode.NORMAL
+        # Army needs its spots before it can run; calibrating brings the window back, ready for Start
+        if is_army and self.army_targets is None:
+            self._engine.post(self._engine.calibrate, RunMode.ARMY)
+            return
+
+        mode = RunMode.GBG if is_gbg else RunMode.QI if is_qi else RunMode.BUILD_MENU if is_build_menu else RunMode.ARMY if is_army else RunMode.NORMAL
         self._engine.post(self._engine.start, mode, settings)
 
     def _show_message(self, text):

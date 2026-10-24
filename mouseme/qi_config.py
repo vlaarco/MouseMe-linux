@@ -128,3 +128,15 @@ class BuildMenuConfig:
     ]
 
     keys = target_keys + [Key.x]
+
+
+# Army mode: deletes units from the army, clicking five calibrated spots
+class ArmyConfig:
+    label = "Army"
+
+    # Waited once after Start is pressed, before the first Army click; not shown in the window
+    start_delay_ms = 2000
+
+    # The spots, in calibration order
+    ARMY, DELETE_UNIT, UNIT, DELETE_CONFIRM, CLOSE = range(5)
+    calibration_prompts = ["Click Army", "Click Delete Unit", "Click Unit", "Click Delete Confirm", "Click Close"]
