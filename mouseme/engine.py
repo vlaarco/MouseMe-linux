@@ -137,7 +137,8 @@ class Engine:
 
             self._click_positions.append(target)
 
-            overlay.set(str(settings.points), Color.red)
+            # Counts down the repetitions left, as the replay does once it starts
+            overlay.set(str(settings.repetitions), Color.red)
 
             positions = list(self._click_positions)
             self.loop.create_task(self._replay_clicks(self._current_run_id, positions, settings))
@@ -216,9 +217,11 @@ class Engine:
         self._recording = False
         self._close_overlay()
 
+        # A pinned window stays visible and shows the run in its status bar, so the overlay stays hidden
         overlay = self.controller.create_overlay()
         self.overlay = overlay
-        overlay.show()
+        if not self.controller.is_stay_on_top:
+            overlay.show()
 
         self.controller.minimize()
         return overlay

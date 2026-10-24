@@ -138,6 +138,13 @@ class MainWindow(Gtk.Window):
         self._status_label = Gtk.Label(xalign=0)
         self._status_version = 0
 
+        # The overlay's text and colour, mirrored in the status bar while a run is going; empty when nothing is running
+        self._run_status_text = ""
+        self._run_status_color = ""
+
+        # Set while a message is showing, which takes the place of the run's text or the mode's name until it clears
+        self._showing_message = False
+
         self._build_ui()
         self._load_settings()
 
@@ -159,7 +166,7 @@ class MainWindow(Gtk.Window):
     # MARK: - Called from the engine thread
 
     def create_overlay(self):
-        return OverlayPanel()
+        return OverlayPanel(on_change=self._show_run_status)
 
     # The calibrated Build Menu and Army spots, or None until all of them have been calibrated
     @property
@@ -298,8 +305,8 @@ class MainWindow(Gtk.Window):
         self._status_label.set_size_request(-1, 16)
         self._status_label.set_margin_start(12)
         self._status_label.set_margin_end(12)
-        self._status_label.set_margin_top(3)
-        self._status_label.set_margin_bottom(4)
+        self._status_label.set_margin_top(5)
+        self._status_label.set_margin_bottom(7)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         content.pack_start(grid, False, False, 0)
@@ -346,6 +353,14 @@ class MainWindow(Gtk.Window):
         self._settings[SettingsKey.stay_on_top] = self._pin_button.get_active()
         self._settings.save()
         self._apply_stay_on_top()
+
+        # A pinned window shows the run in its status bar, so the overlay is only needed while unpinned
+        overlay = self._engine.overlay
+        if overlay is not None:
+            if self._pin_button.get_active():
+                overlay.hide()
+            else:
+                overlay.show()
 
     # Stays above every other window, including after a run minimizes and restores it, until the pin is clicked again
     def _apply_stay_on_top(self):
@@ -437,6 +452,8 @@ class MainWindow(Gtk.Window):
         for field in (self._points_gbg_text, self._start_delay_gbg_text, self._loop_delay_gbg_text, self._delay_gbg_text, self._repetitions_gbg_text):
             field.set_visible(not show_normal)
 
+        self._refresh_status()
+
     # Shows Army's values and labels in the editable fields while Army mode is on, and normal mode's otherwise
     def _swap_army_fields(self):
         is_army = self._army_check_box.get_active()
@@ -501,22 +518,68 @@ class MainWindow(Gtk.Window):
     def show_status(self, text):
         GLib.idle_add(self._show_status, text)
 
-    # Shows a message in the status line; a transient one clears itself after a few seconds unless replaced first
+    # Shows a message in the status line; a transient one clears itself after a few seconds unless replaced first.
+    # An empty message clears straight away.
     def _show_status(self, text, transient=True):
+        if not text:
+            self._showing_message = False
+            self._refresh_status()
+            return False
+
+        self._showing_message = True
         self._status_label.set_markup(f"<small>{GLib.markup_escape_text(text)}</small>")
+        self._status_label.get_style_context().add_class("dim-label")
         self._status_version += 1
 
-        if transient and text:
+        if transient:
             version = self._status_version
 
             def clear():
                 if self._status_version == version:
-                    self._status_label.set_text("")
+                    self._showing_message = False
+                    self._refresh_status()
                 return False
 
             GLib.timeout_add(3000, clear)
 
         return False
+
+    # Mirrors the overlay, on the GTK thread; an empty text means the run has ended
+    def _show_run_status(self, text, color):
+        self._run_status_text = text
+        self._run_status_color = color
+        self._refresh_status()
+
+    # The selected mode, shown in the status bar when nothing is running and no message is showing
+    @property
+    def _mode_name(self):
+        if self._qi_check_box.get_active():
+            return "QI mode"
+        if self._gbg_check_box.get_active():
+            return "GBG mode"
+        if self._build_menu_check_box.get_active():
+            return "Build mode"
+        if self._army_check_box.get_active():
+            return "Army mode"
+        return "Normal mode"
+
+    # Shows the run's text while a run is going, otherwise the selected mode, unless a message is showing.
+    # QI's yellow is unreadable on a light window, so it shows darker here.
+    def _refresh_status(self):
+        if self._showing_message:
+            return
+
+        self._status_version += 1
+        style = self._status_label.get_style_context()
+
+        if self._run_status_text:
+            shown = "#b8860b" if self._run_status_color == "#ffcc00" else self._run_status_color
+            text = GLib.markup_escape_text(self._run_status_text)
+            self._status_label.set_markup(f'<small><span foreground="{shown}">{text}</span></small>')
+            style.remove_class("dim-label")
+        else:
+            self._status_label.set_markup(f"<small>{GLib.markup_escape_text(self._mode_name)}</small>")
+            style.add_class("dim-label")
 
     # MARK: - Start
 

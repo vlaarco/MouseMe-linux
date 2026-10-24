@@ -115,7 +115,7 @@ class QIConfig:
 
 # Build Menu mode: each key clicks its own calibrated spot, kept separate from QI's; the calibrate button sets them
 class BuildMenuConfig:
-    label = "Build Menu"
+    label = "Build"
 
     # In calibration order: the Build button, the four build menu slots (top left, top right, bottom left, bottom right),
     # then the Sell, Move and Flat Mode toolbar buttons

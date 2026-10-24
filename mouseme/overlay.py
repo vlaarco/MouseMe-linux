@@ -23,11 +23,14 @@ _TRAY_X_SCRIPT = "Main.panel._rightBox.get_transformed_position()[0]"
 # The counterpart of the macOS menu bar item and the text over the Windows taskbar.
 # Every method is safe to call from any thread; the window itself only lives on the GTK thread.
 class OverlayPanel:
-    def __init__(self):
+    # on_change is called on the GTK thread with the text and colour on every change, and with an empty text once
+    # closed, so the main window can mirror it
+    def __init__(self, on_change=None):
         self._window = None
         self._text = ""
         self._color = "#ff3b30"
         self._height = DEFAULT_HEIGHT
+        self._on_change = on_change
 
         # The latest text and how many times it has changed, kept on the calling (engine) thread;
         # the version lets a delayed revert tell a newer label has replaced its own
@@ -36,6 +39,10 @@ class OverlayPanel:
 
     def show(self):
         GLib.idle_add(self._show)
+
+    # Takes the text off the top bar while the run carries on; show() puts it back
+    def hide(self):
+        GLib.idle_add(self._hide)
 
     def close(self):
         GLib.idle_add(self._close)
@@ -51,6 +58,9 @@ class OverlayPanel:
     # MARK: - GTK thread
 
     def _show(self):
+        if self._window is not None:
+            return False
+
         # A popup is override-redirect: the window manager never focuses, decorates or lists it
         window = Gtk.Window(type=Gtk.WindowType.POPUP)
         window.set_app_paintable(True)
@@ -72,16 +82,27 @@ class OverlayPanel:
         self._window = window
         return False
 
-    def _close(self):
+    def _hide(self):
         if self._window is not None:
             self._window.destroy()
             self._window = None
+        return False
+
+    def _close(self):
+        self._hide()
+
+        if self._on_change is not None:
+            self._on_change("", self._color)
+            self._on_change = None
         return False
 
     def _set(self, text, color):
         self._text = text
         if color is not None:
             self._color = color
+
+        if self._on_change is not None:
+            self._on_change(self._text, self._color)
 
         if self._window is not None:
             self._window.queue_draw()
