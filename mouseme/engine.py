@@ -713,12 +713,13 @@ class Engine:
 
             stopped = False
             for unit in range(max(settings.points, 0)):
-                if self.overlay is not None:
-                    self.overlay.set_text(str((settings.repetitions - repetition) * settings.points - unit))
-
                 if not (await click(ArmyConfig.UNIT, settings.delay) and await click(ArmyConfig.DELETE_CONFIRM, settings.delay)):
                     stopped = True
                     break
+
+                # Counts down once the unit is deleted, so the last one leaves 0
+                if self.overlay is not None:
+                    self.overlay.set_text(str((settings.repetitions - repetition) * settings.points - unit - 1))
 
             if stopped or not await click(ArmyConfig.CLOSE, settings.loop_delay):
                 break
