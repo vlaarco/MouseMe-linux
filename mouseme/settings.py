@@ -16,6 +16,7 @@ class SettingsKey:
     stay_on_top = "StayOnTop"
     build_menu = "BuildMenu"
     build_menu_targets = "BuildMenuTargets"
+    gbg_target = "GbgTarget"
     army = "Army"
     army_units = "ArmyUnits"
     army_delay = "ArmyDelay"
@@ -36,6 +37,7 @@ class SettingsKey:
         stay_on_top: False,
         build_menu: False,
         build_menu_targets: None,
+        gbg_target: None,
         army: False,
         army_units: 20,
         army_delay: 1500,

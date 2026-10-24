@@ -176,6 +176,14 @@ class MainWindow(Gtk.Window):
     def save_army_targets(self, targets):
         self._save_spots(SettingsKey.army_targets, targets)
 
+    @property
+    def gbg_target(self):
+        spots = self._saved_spots(SettingsKey.gbg_target, 1)
+        return None if spots is None else spots[0]
+
+    def save_gbg_target(self, targets):
+        self._save_spots(SettingsKey.gbg_target, targets)
+
     def _saved_spots(self, key, count):
         saved = self._settings[key]
         if isinstance(saved, list) and len(saved) == count and all(isinstance(p, list) and len(p) == 2 for p in saved):
@@ -451,7 +459,7 @@ class MainWindow(Gtk.Window):
     # The modes that can be calibrated so far
     @property
     def _calibratable_mode_buttons(self):
-        return [self._build_menu_check_box, self._army_check_box]
+        return [self._gbg_check_box, self._build_menu_check_box, self._army_check_box]
 
     def _calibrate_button_changed(self, _):
         if self._calibrate_button.get_active():
@@ -480,11 +488,12 @@ class MainWindow(Gtk.Window):
         self._calibrate_button.set_active(False)
 
         if button not in self._calibratable_mode_buttons:
-            # Only Build Menu and Army can be calibrated so far
-            self._show_status("Build or Army only")
+            # QI's spots are fixed
+            self._show_status("QI can't be calibrated")
             return
 
-        self._engine.post(self._engine.calibrate, RunMode.ARMY if button is self._army_check_box else RunMode.BUILD_MENU)
+        mode = RunMode.ARMY if button is self._army_check_box else RunMode.GBG if button is self._gbg_check_box else RunMode.BUILD_MENU
+        self._engine.post(self._engine.calibrate, mode)
 
     # MARK: - Status
 
@@ -598,7 +607,11 @@ class MainWindow(Gtk.Window):
         s[SettingsKey.army] = is_army
         s.save()
 
-        # Army needs its spots before it can run; calibrating brings the window back, ready for Start
+        # GBG and Army need their spots before they can run; calibrating brings the window back, ready for Start
+        if is_gbg and self.gbg_target is None:
+            self._engine.post(self._engine.calibrate, RunMode.GBG)
+            return
+
         if is_army and self.army_targets is None:
             self._engine.post(self._engine.calibrate, RunMode.ARMY)
             return

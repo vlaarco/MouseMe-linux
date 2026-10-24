@@ -109,8 +109,6 @@ class QIConfig:
 
     mode_keys = {Key.s, Key.v}
 
-    gbg_click: Point = (1300, 1052)
-
     # A physical click above this line is in the browser tab strip
     tab_strip_max_y = 106
 
@@ -128,6 +126,16 @@ class BuildMenuConfig:
     ]
 
     keys = target_keys + [Key.x]
+
+
+# GBG mode clicks one calibrated spot: the sweet spot where all of a battle's buttons overlap. Calibration records your
+# clicks (which still reach the game) as you fight, and saves the spot once enough clicks in a row land in the same place.
+class GbgConfig:
+    calibration_prompt = "Click GBG spot"
+
+    # How many clicks in a row must land within spot_tolerance pixels of the first of them
+    clicks_needed = 4
+    spot_tolerance = 2
 
 
 # Army mode: deletes units from the army, clicking five calibrated spots

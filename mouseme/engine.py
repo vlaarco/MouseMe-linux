@@ -1,12 +1,13 @@
 import asyncio
 import enum
+import math
 import random
 import threading
 import time
 from dataclasses import dataclass
 
 from .mouse import Mouse
-from .qi_config import ArmyConfig, BuildMenuConfig, Key, QIConfig
+from .qi_config import ArmyConfig, BuildMenuConfig, GbgConfig, Key, QIConfig
 
 
 @dataclass
@@ -129,7 +130,12 @@ class Engine:
         overlay = self._begin_run()
 
         if mode == RunMode.GBG:
-            self._click_positions.append(QIConfig.gbg_click)
+            target = self.controller.gbg_target
+            if target is None:
+                self._stop_task()
+                return
+
+            self._click_positions.append(target)
 
             overlay.set(str(settings.points), Color.red)
 
@@ -161,12 +167,24 @@ class Engine:
             self._recording = True
 
     # Calibrates a mode's spots from the calibrate button: the window minimizes while each spot is clicked in the game,
-    # then comes back. X cancels and keeps the old spots. Only Build Menu can be calibrated so far.
+    # then comes back. X cancels and keeps the old spots. GBG, Build Menu and Army can be calibrated.
     def calibrate(self, mode):
-        if mode == RunMode.BUILD_MENU:
-            prompts, save = BuildMenuConfig.calibration_prompts, self.controller.save_build_menu_targets
+        if mode == RunMode.GBG:
+            async def record(overlay):
+                spot = await self._calibrate_sweet_spot(overlay)
+                return None if spot is None else [spot]
+
+            save = self.controller.save_gbg_target
+        elif mode == RunMode.BUILD_MENU:
+            async def record(overlay):
+                return await self._calibrate_targets(BuildMenuConfig.calibration_prompts, overlay)
+
+            save = self.controller.save_build_menu_targets
         elif mode == RunMode.ARMY:
-            prompts, save = ArmyConfig.calibration_prompts, self.controller.save_army_targets
+            async def record(overlay):
+                return await self._calibrate_targets(ArmyConfig.calibration_prompts, overlay)
+
+            save = self.controller.save_army_targets
         else:
             return
 
@@ -175,12 +193,12 @@ class Engine:
 
         self._buffered_qi_key = None
         self._set_calibration_active(True)
-        self.loop.create_task(self._run_calibration(self._current_run_id, overlay, prompts, save))
+        self.loop.create_task(self._run_calibration(self._current_run_id, overlay, record, save))
 
-    async def _run_calibration(self, run_id, overlay, prompts, save):
+    async def _run_calibration(self, run_id, overlay, record, save):
         targets = None
         try:
-            targets = await self._calibrate_targets(prompts, overlay)
+            targets = await record(overlay)
             if targets is not None:
                 save(targets)
         finally:
@@ -678,6 +696,32 @@ class Engine:
             self._pending_calibration_click = None
 
         return targets
+
+    # Records clicks until clicks_needed in a row land within spot_tolerance of the first of them, and returns that first
+    # click; None if cancelled. A click anywhere else starts the count again from that click.
+    async def _calibrate_sweet_spot(self, overlay):
+        clicks = []
+        overlay.set_text(GbgConfig.calibration_prompt)
+
+        try:
+            while True:
+                self._pending_calibration_click = self.loop.create_future()
+                click = await self._pending_calibration_click
+
+                if click is None:
+                    return None
+
+                if clicks and math.dist(click, clicks[0]) > GbgConfig.spot_tolerance:
+                    clicks.clear()
+
+                clicks.append(click)
+
+                if len(clicks) >= GbgConfig.clicks_needed:
+                    return clicks[0]
+
+                overlay.set_text(f"GBG spot {len(clicks)}/{GbgConfig.clicks_needed}")
+        finally:
+            self._pending_calibration_click = None
 
     # MARK: - Army
 
