@@ -148,6 +148,7 @@ class Engine:
 
             self._buffered_qi_key = None
             self._set_qi_active(True)
+            self.controller.show_stop_button(True)
             self.loop.create_task(self._run_qi(self._current_run_id))
 
         elif mode == RunMode.BUILD_MENU:
@@ -155,6 +156,7 @@ class Engine:
 
             self._buffered_qi_key = None
             self._set_build_menu_active(True)
+            self.controller.show_stop_button(True)
             self.loop.create_task(self._run_build_menu(self._current_run_id))
 
         elif mode == RunMode.ARMY:
@@ -283,6 +285,7 @@ class Engine:
 
         self.overlay.close()
         self.overlay = None
+        self.controller.show_stop_button(False)
 
         # End a QI or Build Menu loop waiting for a key or click so it can't be woken by a later run's overlay
         self._cancel_pending_key()

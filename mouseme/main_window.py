@@ -145,6 +145,9 @@ class MainWindow(Gtk.Window):
         # Set while a message is showing, which takes the place of the run's text or the mode's name until it clears
         self._showing_message = False
 
+        # Set while a QI or Build run is going, when the Start button is Stop
+        self._stop_button_shown = False
+
         self._build_ui()
         self._load_settings()
 
@@ -583,7 +586,21 @@ class MainWindow(Gtk.Window):
 
     # MARK: - Start
 
+    # Called from the engine thread: while a QI or Build run is going, the Start button is Stop
+    def show_stop_button(self, shown):
+        GLib.idle_add(self._show_stop_button, shown)
+
+    def _show_stop_button(self, shown):
+        self._stop_button_shown = shown
+        self._start_button.set_label("Stop" if shown else "Start")
+        return False
+
     def _start_clicked(self, _):
+        # During a QI or Build run the button is Stop, which ends the run the same way X does
+        if self._stop_button_shown:
+            self._engine.post(self._engine.cancel_run)
+            return
+
         is_gbg = self._gbg_check_box.get_active()
         is_qi = self._qi_check_box.get_active()
         is_build_menu = self._build_menu_check_box.get_active()
