@@ -269,15 +269,10 @@ class Engine:
             self._calibration_active = active
             self.event_tap.grab_keys([Key.x] if active else [])
 
-    # X stops QI or Build Menu; the window comes back only if it's pinned on top, so it otherwise stays out of the game's way
-    def _stop_task_for_x(self):
-        self._stop_task(restore_window=self.controller.is_stay_on_top)
-
-    def _stop_task(self, restore_window=True):
+    # Ends the run and brings the window back
+    def _stop_task(self):
         self._close_overlay()
-
-        if restore_window:
-            self.controller.restore()
+        self.controller.restore()
 
     def _close_overlay(self):
         if self.overlay is None:
@@ -556,7 +551,7 @@ class Engine:
 
                 if building_key == Key.x:
                     # X stops QI here too; Esc or a toolbar click leaves the prompt without stopping it
-                    self._stop_task_for_x()
+                    self._stop_task()
                     return
                 elif building_key != Key.space and building_key not in QIConfig.building_confirm:
                     # Not a building to sell, so it's a new command: leave the prompt and run it as usual
@@ -583,7 +578,7 @@ class Engine:
                     self._last_qi_key = None
 
             elif key == Key.x:
-                self._stop_task_for_x()
+                self._stop_task()
                 return
 
             else:
@@ -651,7 +646,7 @@ class Engine:
                 break
 
             if key == Key.x:
-                self._stop_task_for_x()
+                self._stop_task()
                 return
 
             targets = self.controller.build_menu_targets
