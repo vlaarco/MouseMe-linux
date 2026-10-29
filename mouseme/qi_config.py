@@ -36,8 +36,8 @@ class Spot:
     top_right = "TopRight"
     bottom_left = "BottomLeft"
     bottom_right = "BottomRight"
-    house_tab = "HouseTab"
-    culture_tab = "CultureTab"
+    residential_tab = "ResidentialTab"
+    fourth_tab = "FourthTab"  # Culture in QI's build menu and Expansions in a settlement's, in the same place
     first_page = "FirstPage"
     previous_page = "PreviousPage"
     next_page = "NextPage"
@@ -53,8 +53,8 @@ class Spot:
         top_right: "Click Top Right",
         bottom_left: "Click Bottom Left",
         bottom_right: "Click Bottom Right",
-        house_tab: "Click House Tab",
-        culture_tab: "Click Culture Tab",
+        residential_tab: "Click Residential Tab",
+        fourth_tab: "Click Culture Tab",
         first_page: "Click First Page",
         previous_page: "Click Previous Page",
         next_page: "Click Next Page",
@@ -66,20 +66,20 @@ class Spot:
     }
 
 
-# One click in a QI action: a calibrated spot, or a build menu category tab counted from the top (1 is the House tab).
-# The tabs are evenly spaced, so the House and Culture (4th) tabs give the spot of every tab.
+# One click in a QI or Build action: a calibrated spot, or a build menu category tab counted from the top (1 is the
+# Residential tab). The tabs are evenly spaced, so the 1st and 4th tabs give the spot of every tab.
 @dataclass(frozen=True)
 class QIStep:
-    spot: str = Spot.house_tab
+    spot: str = Spot.residential_tab
     tab: int = 0
 
     def point(self, spots):
         if self.tab == 0:
             return spots[self.spot]
 
-        (hx, hy), (cx, cy) = spots[Spot.house_tab], spots[Spot.culture_tab]
+        (x1, y1), (x4, y4) = spots[Spot.residential_tab], spots[Spot.fourth_tab]
         step = (self.tab - 1) / 3
-        return (round(hx + (cx - hx) * step), round(hy + (cy - hy) * step))
+        return (round(x1 + (x4 - x1) * step), round(y1 + (y4 - y1) * step))
 
 
 def _at(spot):
@@ -108,7 +108,7 @@ class QIConfig:
     # In calibration order: the build menu, then the toolbar
     calibration_spots = [
         Spot.build, Spot.top_left, Spot.top_right, Spot.bottom_left, Spot.bottom_right,
-        Spot.house_tab, Spot.culture_tab, Spot.first_page, Spot.previous_page, Spot.next_page, Spot.last_page,
+        Spot.residential_tab, Spot.fourth_tab, Spot.first_page, Spot.previous_page, Spot.next_page, Spot.last_page,
         Spot.sell, Spot.move, Spot.flat_mode, Spot.cancel,
     ]
 
@@ -171,18 +171,18 @@ class QIConfig:
     # The build menu the Build button opens (with the panel below it) and the category tabs down its right side,
     # as (left, top, width, height). Clicking in either yourself ends the game's Sell or Move mode, so those labels go
     # back to "QI". The menu runs from the left edge to the tabs, and from its title bar above the slots to the bottom
-    # of the screen; the tabs run from the House tab down past the 7th.
+    # of the screen; the tabs run from the Residential tab down past the 7th.
     @staticmethod
     def build_menu_areas(spots):
-        if not all(spot in spots for spot in (Spot.top_left, Spot.house_tab, Spot.culture_tab)):
+        if not all(spot in spots for spot in (Spot.top_left, Spot.residential_tab, Spot.fourth_tab)):
             return []
 
-        top_left, house, culture = spots[Spot.top_left], spots[Spot.house_tab], spots[Spot.culture_tab]
-        tab_spacing = (culture[1] - house[1]) / 3
-        tabs_left = house[0] - 15
+        top_left, first, fourth = spots[Spot.top_left], spots[Spot.residential_tab], spots[Spot.fourth_tab]
+        tab_spacing = (fourth[1] - first[1]) / 3
+        tabs_left = first[0] - 15
         return [
             (0, top_left[1] - 120, tabs_left, 100_000),
-            (tabs_left, house[1] - tab_spacing / 2, 35, tab_spacing * 7),
+            (tabs_left, first[1] - tab_spacing / 2, 35, tab_spacing * 7),
         ]
 
     mode_keys = {Key.s, Key.v}
@@ -195,15 +195,24 @@ class QIConfig:
 class BuildMenuConfig:
     label = "Build"
 
-    # In calibration order: the Build button, the four build menu slots (top left, top right, bottom left, bottom right),
-    # then the Sell, Move, Flat Mode and Cancel toolbar buttons
-    target_keys = [Key.z, Key.one, Key.two, Key.three, Key.four, Key.s, Key.v, Key.f, Key.escape]
-    target_spots = [
-        Spot.build, Spot.top_left, Spot.top_right, Spot.bottom_left, Spot.bottom_right,
+    # Each key's spot: the Build button, the four build menu slots (1 to 4: top left, top right, bottom left, bottom right),
+    # and the Sell, Move, Flat Mode and Cancel toolbar buttons
+    key_spots = {
+        Key.z: Spot.build, Key.one: Spot.top_left, Key.two: Spot.top_right, Key.three: Spot.bottom_left,
+        Key.four: Spot.bottom_right, Key.s: Spot.sell, Key.v: Spot.move, Key.f: Spot.flat_mode, Key.escape: Spot.cancel,
+    }
+
+    # Shift with 1 to 4 clicks the settlement build menu's four category tabs instead, counted from the top
+    tab_keys = [Key.one, Key.two, Key.three, Key.four]
+
+    # In calibration order; the Residential and Expansions (4th) tabs give the spot of every tab
+    calibration_spots = [
+        Spot.build, Spot.top_left, Spot.top_right, Spot.bottom_left, Spot.bottom_right, Spot.residential_tab, Spot.fourth_tab,
         Spot.sell, Spot.move, Spot.flat_mode, Spot.cancel,
     ]
+    calibration_prompts = ["Click Expansions Tab" if spot == Spot.fourth_tab else Spot.prompts[spot] for spot in calibration_spots]
 
-    keys = target_keys + [Key.x]
+    keys = list(dict.fromkeys(list(key_spots) + tab_keys + [Key.x]))
 
 
 # GBG mode clicks one calibrated spot: the sweet spot where all of a battle's buttons overlap. Calibration records your

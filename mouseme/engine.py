@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 
 from .mouse import Mouse
-from .qi_config import ArmyConfig, BuildMenuConfig, GbgConfig, Key, QIConfig, Spot
+from .qi_config import ArmyConfig, BuildMenuConfig, GbgConfig, Key, QIConfig, QIStep, Spot
 
 
 @dataclass
@@ -197,10 +197,10 @@ class Engine:
             save = self.controller.save_gbg_target
         elif mode == RunMode.BUILD_MENU:
             async def record(overlay):
-                return await self._calibrate_targets([Spot.prompts[spot] for spot in BuildMenuConfig.target_spots], overlay)
+                return await self._calibrate_targets(BuildMenuConfig.calibration_prompts, overlay)
 
             def save(points):
-                self.controller.save_spots(BuildMenuConfig.target_spots, points)
+                self.controller.save_spots(BuildMenuConfig.calibration_spots, points)
         elif mode == RunMode.ARMY:
             async def record(overlay):
                 return await self._calibrate_targets(ArmyConfig.calibration_prompts, overlay)
@@ -661,7 +661,7 @@ class Engine:
             return run_id != self._current_run_id
 
         # Nothing to click until every spot has been calibrated
-        if self.controller.build_menu_targets is None and self.overlay is not None:
+        if self.controller.build_menu_spots is None and self.overlay is not None:
             await self._calibrate_build_menu(self.overlay)
 
         while True:
@@ -687,16 +687,21 @@ class Engine:
                 self._stop_task()
                 return
 
-            targets = self.controller.build_menu_targets
-            if targets is None:
+            spots = self.controller.build_menu_spots
+            if spots is None:
                 await self._calibrate_build_menu(overlay)
                 continue
 
-            if key not in BuildMenuConfig.target_keys:
+            # Shift with 1 to 4 clicks a category tab; every other key clicks its own spot
+            if self._last_key_shifted and key in BuildMenuConfig.tab_keys:
+                step = QIStep(tab=BuildMenuConfig.tab_keys.index(key) + 1)
+            elif key in BuildMenuConfig.key_spots:
+                step = QIStep(spot=BuildMenuConfig.key_spots[key])
+            else:
                 continue
 
             current_position = self.mouse.location
-            await self._perform_click_sequence(run_id, [targets[BuildMenuConfig.target_keys.index(key)]])
+            await self._perform_click_sequence(run_id, [step.point(spots)])
 
             # A newer run owns the cursor now; just let go of any blocking this run started
             if is_stale():
@@ -710,9 +715,9 @@ class Engine:
 
     # Calibrates Build Menu's spots within a Build Menu run. Cancelling keeps the old spots.
     async def _calibrate_build_menu(self, overlay):
-        targets = await self._calibrate_targets([Spot.prompts[spot] for spot in BuildMenuConfig.target_spots], overlay)
+        targets = await self._calibrate_targets(BuildMenuConfig.calibration_prompts, overlay)
         if targets is not None:
-            self.controller.save_spots(BuildMenuConfig.target_spots, targets)
+            self.controller.save_spots(BuildMenuConfig.calibration_spots, targets)
 
         overlay.set_text(BuildMenuConfig.label)
 

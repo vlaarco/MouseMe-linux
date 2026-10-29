@@ -171,11 +171,19 @@ class MainWindow(Gtk.Window):
     def create_overlay(self):
         return OverlayPanel(on_change=self._show_run_status)
 
-    # The calibrated Build Menu and Army spots, or None until all of them have been calibrated
+    # Build's and QI's spots, or None until all of each mode's spots have been calibrated
     @property
-    def build_menu_targets(self):
+    def build_menu_spots(self):
+        return self._spots_requiring(BuildMenuConfig.calibration_spots)
+
+    @property
+    def qi_spots(self):
+        return self._spots_requiring(QIConfig.calibration_spots)
+
+    # All the calibrated spots, or None until every one of these has been calibrated
+    def _spots_requiring(self, required):
         spots = self.spots
-        return [spots[spot] for spot in BuildMenuConfig.target_spots] if all(spot in spots for spot in BuildMenuConfig.target_spots) else None
+        return spots if all(spot in spots for spot in required) else None
 
     # The calibrated spots shared by Build and QI, by name; may be read from the engine thread
     @property
@@ -184,12 +192,6 @@ class MainWindow(Gtk.Window):
         if not isinstance(saved, dict):
             return {}
         return {name: tuple(p) for name, p in saved.items() if isinstance(p, list) and len(p) == 2}
-
-    # QI's spots, or None until all of them have been calibrated
-    @property
-    def qi_spots(self):
-        spots = self.spots
-        return spots if all(spot in spots for spot in QIConfig.calibration_spots) else None
 
     # Saves these spots, keeping the others
     def save_spots(self, order, points):
