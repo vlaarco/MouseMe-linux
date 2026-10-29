@@ -29,19 +29,89 @@ class Key:
     q = "q"
 
 
+# The game's spots that Build and QI click. Both modes calibrate them and share them, so calibrating either updates both.
+class Spot:
+    build = "Build"
+    top_left = "TopLeft"
+    top_right = "TopRight"
+    bottom_left = "BottomLeft"
+    bottom_right = "BottomRight"
+    house_tab = "HouseTab"
+    culture_tab = "CultureTab"
+    first_page = "FirstPage"
+    previous_page = "PreviousPage"
+    next_page = "NextPage"
+    last_page = "LastPage"
+    sell = "Sell"
+    move = "Move"
+    flat_mode = "FlatMode"
+    cancel = "Cancel"
+
+    prompts = {
+        build: "Click Build",
+        top_left: "Click Top Left",
+        top_right: "Click Top Right",
+        bottom_left: "Click Bottom Left",
+        bottom_right: "Click Bottom Right",
+        house_tab: "Click House Tab",
+        culture_tab: "Click Culture Tab",
+        first_page: "Click First Page",
+        previous_page: "Click Previous Page",
+        next_page: "Click Next Page",
+        last_page: "Click Last Page",
+        sell: "Click Sell",
+        move: "Click Move",
+        flat_mode: "Click Flat Mode",
+        cancel: "Click Cancel",
+    }
+
+
+# One click in a QI action: a calibrated spot, or a build menu category tab counted from the top (1 is the House tab).
+# The tabs are evenly spaced, so the House and Culture (4th) tabs give the spot of every tab.
+@dataclass(frozen=True)
+class QIStep:
+    spot: str = Spot.house_tab
+    tab: int = 0
+
+    def point(self, spots):
+        if self.tab == 0:
+            return spots[self.spot]
+
+        (hx, hy), (cx, cy) = spots[Spot.house_tab], spots[Spot.culture_tab]
+        step = (self.tab - 1) / 3
+        return (round(hx + (cx - hx) * step), round(hy + (cy - hy) * step))
+
+
+def _at(spot):
+    return QIStep(spot=spot)
+
+
+def _tab(number):
+    return QIStep(tab=number)
+
+
 @dataclass(frozen=True)
 class QIAction:
     label: str
 
     # Clicked only when this key differs from the previous QI key
-    setup: List[Point] = field(default_factory=list)
+    setup: List[QIStep] = field(default_factory=list)
 
     # Clicked on every press
-    clicks: List[Point] = field(default_factory=list)
+    clicks: List[QIStep] = field(default_factory=list)
 
 
 # All coordinates are root-window pixels with the origin at the top-left of the screen
 class QIConfig:
+    label = "QI"
+
+    # In calibration order: the build menu, then the toolbar
+    calibration_spots = [
+        Spot.build, Spot.top_left, Spot.top_right, Spot.bottom_left, Spot.bottom_right,
+        Spot.house_tab, Spot.culture_tab, Spot.first_page, Spot.previous_page, Spot.next_page, Spot.last_page,
+        Spot.sell, Spot.move, Spot.flat_mode, Spot.cancel,
+    ]
+
     keys = [
         Key.space,
         Key.escape,
@@ -60,52 +130,60 @@ class QIConfig:
         Key.z,
     ]
 
-    # Space and X are handled separately: Space picks a building to confirm, X stops QI
+    # Space and X are handled separately: Space picks a building to confirm, X stops QI.
+    # A building is found by its category tab, its page (First Page, then Next Page for page 2) and its slot.
     actions: Dict[str, QIAction] = {
-        Key.b: QIAction("Brewery", setup=[(239, 954), (16, 1225), (175, 1223)], clicks=[(158, 1127)]),
-        Key.c: QIAction("Church", setup=[(240, 1025), (13, 1223)], clicks=[(157, 1136)]),
-        Key.d: QIAction("Doctor", setup=[(242, 1023), (13, 1223), (176, 1225)], clicks=[(58, 969)]),
-        Key.e: QIAction("Estate", setup=[(241, 919), (12, 1224), (174, 1223)], clicks=[(55, 1133)]),
-        Key.escape: QIAction("Cancel", clicks=[(1355, 307)]),
-        Key.f: QIAction("Flat Mode", clicks=[(1300, 307)]),
-        Key.m: QIAction("Multistory", setup=[(241, 919), (12, 1224)], clicks=[(55, 975)]),
-        Key.p: QIAction("Pillory", setup=[(241, 1026), (12, 1222)], clicks=[(57, 1131)]),
-        Key.s: QIAction("Sell", clicks=[(1206, 307)]),
-        Key.t: QIAction("Tannery", setup=[(239, 952), (15, 1226)], clicks=[(55, 1124)]),
-        Key.v: QIAction("Move", clicks=[(1260, 307)]),
-        Key.y: QIAction("Bakery", setup=[(237, 953), (11, 1223)], clicks=[(56, 975)]),
-        Key.z: QIAction("Build", clicks=[(26, 1278)]),
+        Key.b: QIAction("Brewery", setup=[_tab(2), _at(Spot.first_page), _at(Spot.next_page)], clicks=[_at(Spot.bottom_right)]),
+        Key.c: QIAction("Church", setup=[_tab(4), _at(Spot.first_page)], clicks=[_at(Spot.bottom_right)]),
+        Key.d: QIAction("Doctor", setup=[_tab(4), _at(Spot.first_page), _at(Spot.next_page)], clicks=[_at(Spot.top_left)]),
+        Key.e: QIAction("Estate", setup=[_tab(1), _at(Spot.first_page), _at(Spot.next_page)], clicks=[_at(Spot.bottom_left)]),
+        Key.escape: QIAction("Cancel", clicks=[_at(Spot.cancel)]),
+        Key.f: QIAction("Flat Mode", clicks=[_at(Spot.flat_mode)]),
+        Key.m: QIAction("Multistory", setup=[_tab(1), _at(Spot.first_page)], clicks=[_at(Spot.top_left)]),
+        Key.p: QIAction("Pillory", setup=[_tab(4), _at(Spot.first_page)], clicks=[_at(Spot.bottom_left)]),
+        Key.s: QIAction("Sell", clicks=[_at(Spot.sell)]),
+        Key.t: QIAction("Tannery", setup=[_tab(2), _at(Spot.first_page)], clicks=[_at(Spot.bottom_left)]),
+        Key.v: QIAction("Move", clicks=[_at(Spot.move)]),
+        Key.y: QIAction("Bakery", setup=[_tab(2), _at(Spot.first_page)], clicks=[_at(Spot.top_left)]),
+        Key.z: QIAction("Build", clicks=[_at(Spot.build)]),
     }
 
-    building_confirm: Dict[str, List[Point]] = {
-        Key.b: [(1100, 930), (1400, 975)],
-        Key.c: [(1100, 970), (1400, 1020)],
-        Key.d: [(1097, 945), (1400, 1002)],
-        Key.e: [(1100, 970), (1400, 1020)],
-        Key.m: [(1100, 970), (1400, 1015)],
-        Key.t: [(1100, 935), (1400, 985)],
-        Key.y: [(1100, 950), (1400, 1000)],
-    }
+    # The buildings Space can sell. Each sell dialog's checkbox and confirm button sit in a different place, so each
+    # building learns its own the first time it's sold; recalibrating QI clears them, since the dialogs move with the game.
+    building_keys = {Key.b, Key.c, Key.d, Key.e, Key.m, Key.t, Key.y}
+    confirm_prompts = ["Click Checkbox", "Click Confirm"]
 
     # Actions whose label reverts to "QI" after a few seconds; every other label stays until the next key
     transient_keys = {Key.escape, Key.f, Key.z}
     transient_label_seconds = 3
 
-    # The toolbar buttons by QI key as (left, top, width, height), each 43 x 43 and 50 apart.
-    # Clicking one yourself changes the game's mode just like its QI key does, so the label follows either way.
-    toolbar_buttons = {
-        Key.s: (1184, 286, 43, 43),
-        Key.v: (1234, 286, 43, 43),
-        Key.f: (1284, 286, 43, 43),
-        Key.escape: (1334, 286, 43, 43),
-    }
+    # The toolbar buttons by QI key. Clicking one yourself changes the game's mode just like its QI key does, so the
+    # label follows either way.
+    toolbar_spots = {Key.s: Spot.sell, Key.v: Spot.move, Key.f: Spot.flat_mode, Key.escape: Spot.cancel}
+    toolbar_button_size = 43
+
+    # A toolbar button's area around its spot, as (left, top, width, height)
+    @staticmethod
+    def toolbar_button(spot):
+        size = QIConfig.toolbar_button_size
+        return (spot[0] - size / 2, spot[1] - size / 2, size, size)
 
     # The build menu the Build button opens (with the panel below it) and the category tabs down its right side,
-    # as (left, top, width, height). Clicking in either yourself ends the game's Sell or Move mode, so those labels go back to "QI".
-    build_menu_areas = [
-        (0, 856, 223, 534),
-        (223, 902, 35, 244),
-    ]
+    # as (left, top, width, height). Clicking in either yourself ends the game's Sell or Move mode, so those labels go
+    # back to "QI". The menu runs from the left edge to the tabs, and from its title bar above the slots to the bottom
+    # of the screen; the tabs run from the House tab down past the 7th.
+    @staticmethod
+    def build_menu_areas(spots):
+        if not all(spot in spots for spot in (Spot.top_left, Spot.house_tab, Spot.culture_tab)):
+            return []
+
+        top_left, house, culture = spots[Spot.top_left], spots[Spot.house_tab], spots[Spot.culture_tab]
+        tab_spacing = (culture[1] - house[1]) / 3
+        tabs_left = house[0] - 15
+        return [
+            (0, top_left[1] - 120, tabs_left, 100_000),
+            (tabs_left, house[1] - tab_spacing / 2, 35, tab_spacing * 7),
+        ]
 
     mode_keys = {Key.s, Key.v}
 
@@ -113,16 +191,16 @@ class QIConfig:
     tab_strip_max_y = 106
 
 
-# Build Menu mode: each key clicks its own calibrated spot, kept separate from QI's; the calibrate button sets them
+# Build Menu mode: each key clicks its own calibrated spot; the calibrate button sets them
 class BuildMenuConfig:
     label = "Build"
 
     # In calibration order: the Build button, the four build menu slots (top left, top right, bottom left, bottom right),
-    # then the Sell, Move and Flat Mode toolbar buttons
-    target_keys = [Key.z, Key.one, Key.two, Key.three, Key.four, Key.s, Key.v, Key.f]
-    calibration_prompts = [
-        "Click Build", "Click Top Left", "Click Top Right", "Click Bottom Left", "Click Bottom Right",
-        "Click Sell", "Click Move", "Click Flat Mode",
+    # then the Sell, Move, Flat Mode and Cancel toolbar buttons
+    target_keys = [Key.z, Key.one, Key.two, Key.three, Key.four, Key.s, Key.v, Key.f, Key.escape]
+    target_spots = [
+        Spot.build, Spot.top_left, Spot.top_right, Spot.bottom_left, Spot.bottom_right,
+        Spot.sell, Spot.move, Spot.flat_mode, Spot.cancel,
     ]
 
     keys = target_keys + [Key.x]

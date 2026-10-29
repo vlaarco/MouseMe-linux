@@ -4,7 +4,7 @@ import cairo
 from gi.repository import Gdk, GLib, Gtk, Pango
 
 from .engine import Color, RunMode, RunSettings
-from .qi_config import ArmyConfig, BuildMenuConfig
+from .qi_config import ArmyConfig, BuildMenuConfig, QIConfig
 from .overlay import OverlayPanel
 from .settings import SettingsKey
 
@@ -174,10 +174,47 @@ class MainWindow(Gtk.Window):
     # The calibrated Build Menu and Army spots, or None until all of them have been calibrated
     @property
     def build_menu_targets(self):
-        return self._saved_spots(SettingsKey.build_menu_targets, len(BuildMenuConfig.target_keys))
+        spots = self.spots
+        return [spots[spot] for spot in BuildMenuConfig.target_spots] if all(spot in spots for spot in BuildMenuConfig.target_spots) else None
 
-    def save_build_menu_targets(self, targets):
-        self._save_spots(SettingsKey.build_menu_targets, targets)
+    # The calibrated spots shared by Build and QI, by name; may be read from the engine thread
+    @property
+    def spots(self):
+        saved = self._settings[SettingsKey.spots]
+        if not isinstance(saved, dict):
+            return {}
+        return {name: tuple(p) for name, p in saved.items() if isinstance(p, list) and len(p) == 2}
+
+    # QI's spots, or None until all of them have been calibrated
+    @property
+    def qi_spots(self):
+        spots = self.spots
+        return spots if all(spot in spots for spot in QIConfig.calibration_spots) else None
+
+    # Saves these spots, keeping the others
+    def save_spots(self, order, points):
+        saved = dict(self._settings[SettingsKey.spots] or {})
+        for spot, point in zip(order, points):
+            saved[spot] = list(point)
+        self._settings[SettingsKey.spots] = saved
+        GLib.idle_add(self._save_settings)
+
+    # Each building's sell dialog checkbox and confirm button, learned the first time it's sold, by its label
+    def confirm_spots(self, building):
+        saved = (self._settings[SettingsKey.confirm_spots] or {}).get(building)
+        if isinstance(saved, list) and len(saved) == len(QIConfig.confirm_prompts) and all(isinstance(p, list) and len(p) == 2 for p in saved):
+            return [tuple(p) for p in saved]
+        return None
+
+    def save_confirm_spots(self, building, points):
+        saved = dict(self._settings[SettingsKey.confirm_spots] or {})
+        saved[building] = [list(p) for p in points]
+        self._settings[SettingsKey.confirm_spots] = saved
+        GLib.idle_add(self._save_settings)
+
+    def clear_confirm_spots(self):
+        self._settings[SettingsKey.confirm_spots] = None
+        GLib.idle_add(self._save_settings)
 
     @property
     def army_targets(self):
@@ -389,8 +426,8 @@ class MainWindow(Gtk.Window):
         on = button.get_active()
         style = button.get_style_context()
 
-        # While calibration is armed, the modes that can be calibrated are green
-        if self._armed_mode_states is not None and button in self._calibratable_mode_buttons:
+        # While calibration is armed, the mode icons are green, since every mode can be calibrated
+        if self._armed_mode_states is not None and button in self._mode_buttons:
             color = Gdk.RGBA(0.18, 0.62, 0.26, 1)
         elif on:
             found, color = style.lookup_color("theme_selected_bg_color")
@@ -476,14 +513,9 @@ class MainWindow(Gtk.Window):
 
     # MARK: - Calibration
 
-    # The modes that can be calibrated so far
-    @property
-    def _calibratable_mode_buttons(self):
-        return [self._gbg_check_box, self._build_menu_check_box, self._army_check_box]
-
     def _calibrate_button_changed(self, _):
         if self._calibrate_button.get_active():
-            # Show every mode as off, with the ones that can be calibrated in green, so the mode that's actually on
+            # Show every mode as off and in green, since every mode can be calibrated, so the mode that's actually on
             # doesn't look like the one being calibrated. Disarming puts them back as they were.
             self._armed_mode_states = [button.get_active() for button in self._mode_buttons]
             self._set_mode_states([False] * len(self._mode_buttons))
@@ -507,12 +539,14 @@ class MainWindow(Gtk.Window):
     def _calibrate_mode(self, button):
         self._calibrate_button.set_active(False)
 
-        if button not in self._calibratable_mode_buttons:
-            # QI's spots are fixed
-            self._show_status("QI can't be calibrated")
-            return
-
-        mode = RunMode.ARMY if button is self._army_check_box else RunMode.GBG if button is self._gbg_check_box else RunMode.BUILD_MENU
+        if button is self._qi_check_box:
+            mode = RunMode.QI
+        elif button is self._army_check_box:
+            mode = RunMode.ARMY
+        elif button is self._gbg_check_box:
+            mode = RunMode.GBG
+        else:
+            mode = RunMode.BUILD_MENU
         self._engine.post(self._engine.calibrate, mode)
 
     # MARK: - Status
@@ -682,7 +716,11 @@ class MainWindow(Gtk.Window):
         s[SettingsKey.army] = is_army
         s.save()
 
-        # GBG and Army need their spots before they can run; calibrating brings the window back, ready for Start
+        # QI, GBG and Army need their spots before they can run; calibrating brings the window back, ready for Start
+        if is_qi and self.qi_spots is None:
+            self._engine.post(self._engine.calibrate, RunMode.QI)
+            return
+
         if is_gbg and self.gbg_target is None:
             self._engine.post(self._engine.calibrate, RunMode.GBG)
             return

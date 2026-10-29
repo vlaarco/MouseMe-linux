@@ -46,7 +46,7 @@ def main():
 
     engine = Engine(debug=args.debug)
     engine.event_tap = EventTap(
-        on_key_down=lambda key: engine.post(engine.handle_key_down, key),
+        on_key_down=lambda key, shifted: engine.post(engine.handle_key_down, key, shifted),
         on_left_click=lambda x, y, injected: engine.post(engine.handle_left_click, x, y, injected),
     )
     engine.start_thread()

@@ -15,7 +15,8 @@ class SettingsKey:
     qi = "QI"
     stay_on_top = "StayOnTop"
     build_menu = "BuildMenu"
-    build_menu_targets = "BuildMenuTargets"
+    spots = "Spots"
+    confirm_spots = "ConfirmSpots"
     gbg_target = "GbgTarget"
     army = "Army"
     army_units = "ArmyUnits"
@@ -36,7 +37,8 @@ class SettingsKey:
         qi: False,
         stay_on_top: False,
         build_menu: False,
-        build_menu_targets: None,
+        spots: None,
+        confirm_spots: None,
         gbg_target: None,
         army: False,
         army_units: 20,

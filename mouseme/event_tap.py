@@ -27,7 +27,7 @@ class EventTap(threading.Thread):
     def __init__(self, on_key_down, on_left_click):
         super().__init__(name="EventTap", daemon=True)
 
-        # on_key_down(key_name) and on_left_click(x, y, from_xtest) are called on this thread
+        # on_key_down(key_name, shifted) and on_left_click(x, y, from_xtest) are called on this thread
         self._on_key_down = on_key_down
         self._on_left_click = on_left_click
 
@@ -146,7 +146,7 @@ class EventTap(threading.Thread):
 
             # While a grabbed key is held the whole keyboard is grabbed, so other keys can arrive here too
             if not key.state & _SHORTCUT_MASK:
-                self._on_key_down(name)
+                self._on_key_down(name, bool(key.state & x11.ShiftMask))
             return
 
         if event.type != x11.GenericEvent:

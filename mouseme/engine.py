@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 
 from .mouse import Mouse
-from .qi_config import ArmyConfig, BuildMenuConfig, GbgConfig, Key, QIConfig
+from .qi_config import ArmyConfig, BuildMenuConfig, GbgConfig, Key, QIConfig, Spot
 
 
 @dataclass
@@ -87,6 +87,9 @@ class Engine:
         self._last_qi_key = None
         self._last_qi_confirm_key = None
 
+        # Whether Shift was held with the most recent key; Shift with a building key relearns its sell dialog
+        self._last_key_shifted = False
+
         self._suppress_mouse_input = False
         self._suppress_token = 0
 
@@ -145,7 +148,12 @@ class Engine:
             self.loop.create_task(self._replay_clicks(self._current_run_id, positions, settings))
 
         elif mode == RunMode.QI:
-            overlay.set("QI", Color.yellow)
+            # Nothing to click until the build menu and toolbar have been calibrated
+            if self.controller.qi_spots is None:
+                self._stop_task()
+                return
+
+            overlay.set(QIConfig.label, Color.yellow)
 
             self._buffered_qi_key = None
             self._set_qi_active(True)
@@ -171,9 +179,17 @@ class Engine:
             self._recording = True
 
     # Calibrates a mode's spots from the calibrate button: the window minimizes while each spot is clicked in the game,
-    # then comes back. X cancels and keeps the old spots. GBG, Build Menu and Army can be calibrated.
+    # then comes back. X cancels and keeps the old spots. Every mode but normal can be calibrated.
     def calibrate(self, mode):
-        if mode == RunMode.GBG:
+        if mode == RunMode.QI:
+            async def record(overlay):
+                return await self._calibrate_targets([Spot.prompts[spot] for spot in QIConfig.calibration_spots], overlay)
+
+            # The sell dialogs move with the game, so each building learns its dialog again on its next sale
+            def save(points):
+                self.controller.save_spots(QIConfig.calibration_spots, points)
+                self.controller.clear_confirm_spots()
+        elif mode == RunMode.GBG:
             async def record(overlay):
                 spot = await self._calibrate_sweet_spot(overlay)
                 return None if spot is None else [spot]
@@ -181,9 +197,10 @@ class Engine:
             save = self.controller.save_gbg_target
         elif mode == RunMode.BUILD_MENU:
             async def record(overlay):
-                return await self._calibrate_targets(BuildMenuConfig.calibration_prompts, overlay)
+                return await self._calibrate_targets([Spot.prompts[spot] for spot in BuildMenuConfig.target_spots], overlay)
 
-            save = self.controller.save_build_menu_targets
+            def save(points):
+                self.controller.save_spots(BuildMenuConfig.target_spots, points)
         elif mode == RunMode.ARMY:
             async def record(overlay):
                 return await self._calibrate_targets(ArmyConfig.calibration_prompts, overlay)
@@ -299,7 +316,7 @@ class Engine:
 
     # MARK: - Event tap
 
-    def handle_key_down(self, key):
+    def handle_key_down(self, key, shifted=False):
         if self._qi_active:
             active_keys = QIConfig.keys
         elif self._build_menu_active:
@@ -321,6 +338,8 @@ class Engine:
                 if not pending.done():
                     pending.set_result(None)
             return
+
+        self._last_key_shifted = shifted
 
         # A key pressed mid-sequence is held (latest wins, except a held X is never replaced) until the QI loop next waits
         if self._pending_key is not None:
@@ -348,8 +367,13 @@ class Engine:
             self._last_qi_key = None
 
         # Clicking a toolbar button yourself during QI changes the game's mode the same way its QI key does, so the label follows
+        spots = self.controller.spots
         if not injected and self._qi_active and self.overlay is not None:
-            for key, (left, top, width, height) in QIConfig.toolbar_buttons.items():
+            for key, spot in QIConfig.toolbar_spots.items():
+                if spot not in spots:
+                    continue
+
+                left, top, width, height = QIConfig.toolbar_button(spots[spot])
                 if left <= x < left + width and top <= y < top + height:
                     self.overlay.set_text(QIConfig.actions[key].label)
                     self._leave_building_prompt()
@@ -360,7 +384,7 @@ class Engine:
 
         # Clicking in the build menu yourself during QI ends the game's Sell or Move mode
         mode_labels = {QIConfig.actions[key].label for key in QIConfig.mode_keys}
-        in_build_menu = any(left <= x < left + width and top <= y < top + height for left, top, width, height in QIConfig.build_menu_areas)
+        in_build_menu = any(left <= x < left + width and top <= y < top + height for left, top, width, height in QIConfig.build_menu_areas(spots))
         in_sell_or_move = self.overlay is not None and (self.overlay.text in mode_labels or self._awaiting_building_key)
         if not injected and self._qi_active and in_sell_or_move and in_build_menu:
             self.overlay.set_text("QI")
@@ -539,6 +563,8 @@ class Engine:
                 finally:
                     self._awaiting_building_key = False
 
+                relearn = self._last_key_shifted
+
                 if is_stale():
                     return
 
@@ -554,7 +580,7 @@ class Engine:
                     # X stops QI here too; Esc or a toolbar click leaves the prompt without stopping it
                     self._stop_task()
                     return
-                elif building_key != Key.space and building_key not in QIConfig.building_confirm:
+                elif building_key != Key.space and building_key not in QIConfig.building_keys:
                     # Not a building to sell, so it's a new command: leave the prompt and run it as usual
                     overlay.set_text(sell_label)
 
@@ -568,11 +594,20 @@ class Engine:
                         # Repeat last building confirm
                         building_key = self._last_qi_confirm_key
 
-                    confirm_points = QIConfig.building_confirm.get(building_key)
-                    if confirm_points:
+                    if building_key in QIConfig.building_keys:
                         self._last_qi_confirm_key = building_key
-                        overlay.set_text(QIConfig.actions[building_key].label)
-                        await self._perform_click_sequence(run_id, confirm_points)
+                        building = QIConfig.actions[building_key].label
+                        confirm_points = self.controller.confirm_spots(building)
+
+                        if confirm_points is not None and not relearn:
+                            overlay.set_text(building)
+                            await self._perform_click_sequence(run_id, confirm_points)
+                        else:
+                            # The first sale of this building, or Shift with its key: its dialog's spots are learned from your
+                            # own clicks, which sell it
+                            learned = await self._calibrate_targets(QIConfig.confirm_prompts, overlay)
+                            if learned is not None:
+                                self.controller.save_confirm_spots(building, learned)
 
                     # The game stays in Sell mode after selling, ready for the next building
                     overlay.set_text(sell_label)
@@ -584,13 +619,15 @@ class Engine:
 
             else:
                 action = QIConfig.actions.get(key)
-                if action is not None:
+                spots = self.controller.qi_spots
+                if action is not None and spots is not None:
                     overlay.set_text(action.label)
 
-                    if is_new_key and action.setup:
-                        await self._perform_click_sequence(run_id, action.setup)
+                    setup = [step.point(spots) for step in action.setup]
+                    if is_new_key and setup:
+                        await self._perform_click_sequence(run_id, setup)
 
-                    await self._perform_click_sequence(run_id, action.clicks)
+                    await self._perform_click_sequence(run_id, [step.point(spots) for step in action.clicks])
 
                     if key in QIConfig.transient_keys:
                         self._revert_to_qi_label_later(run_id)
@@ -673,9 +710,9 @@ class Engine:
 
     # Calibrates Build Menu's spots within a Build Menu run. Cancelling keeps the old spots.
     async def _calibrate_build_menu(self, overlay):
-        targets = await self._calibrate_targets(BuildMenuConfig.calibration_prompts, overlay)
+        targets = await self._calibrate_targets([Spot.prompts[spot] for spot in BuildMenuConfig.target_spots], overlay)
         if targets is not None:
-            self.controller.save_build_menu_targets(targets)
+            self.controller.save_spots(BuildMenuConfig.target_spots, targets)
 
         overlay.set_text(BuildMenuConfig.label)
 
