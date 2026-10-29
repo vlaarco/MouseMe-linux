@@ -3,7 +3,7 @@ import math
 import cairo
 from gi.repository import Gdk, GLib, Gtk, Pango
 
-from .engine import RunMode, RunSettings
+from .engine import Color, RunMode, RunSettings
 from .qi_config import ArmyConfig, BuildMenuConfig
 from .overlay import OverlayPanel
 from .settings import SettingsKey
@@ -553,18 +553,18 @@ class MainWindow(Gtk.Window):
         self._run_status_color = color
         self._refresh_status()
 
-    # The selected mode, shown in the status bar when nothing is running and no message is showing
+    # The selected mode and its run's colour, shown in the status bar when nothing is running and no message is showing
     @property
-    def _mode_name(self):
+    def _mode(self):
         if self._qi_check_box.get_active():
-            return "QI mode"
+            return "QI mode", Color.yellow
         if self._gbg_check_box.get_active():
-            return "GBG mode"
+            return "GBG mode", Color.red
         if self._build_menu_check_box.get_active():
-            return "Build mode"
+            return "Build mode", Color.blue
         if self._army_check_box.get_active():
-            return "Army mode"
-        return "Normal mode"
+            return "Army mode", Color.purple
+        return "Normal mode", Color.green
 
     # Shows the run's text while a run is going, otherwise the selected mode, unless a message is showing.
     # QI's yellow is unreadable on a light window, so it shows darker here.
@@ -573,16 +573,11 @@ class MainWindow(Gtk.Window):
             return
 
         self._status_version += 1
-        style = self._status_label.get_style_context()
 
-        if self._run_status_text:
-            shown = "#b8860b" if self._run_status_color == "#ffcc00" else self._run_status_color
-            text = GLib.markup_escape_text(self._run_status_text)
-            self._status_label.set_markup(f'<small><span foreground="{shown}">{text}</span></small>')
-            style.remove_class("dim-label")
-        else:
-            self._status_label.set_markup(f"<small>{GLib.markup_escape_text(self._mode_name)}</small>")
-            style.add_class("dim-label")
+        text, color = (self._run_status_text, self._run_status_color) if self._run_status_text else self._mode
+        shown = "#b8860b" if color == Color.yellow else color
+        self._status_label.set_markup(f'<small><span foreground="{shown}">{GLib.markup_escape_text(text)}</span></small>')
+        self._status_label.get_style_context().remove_class("dim-label")
 
     # MARK: - Start
 

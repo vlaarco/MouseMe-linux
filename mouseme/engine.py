@@ -32,6 +32,7 @@ class Color:
     yellow = "#ffcc00"
     green = "#28cd41"
     blue = "#0a84ff"
+    purple = "#af52de"
 
 
 class _Stopped(Exception):
@@ -161,7 +162,7 @@ class Engine:
 
         elif mode == RunMode.ARMY:
             # Counts down every unit left across all repetitions
-            overlay.set(str(settings.points * settings.repetitions), Color.red)
+            overlay.set(str(settings.points * settings.repetitions), Color.purple)
             self.loop.create_task(self._run_army(self._current_run_id, settings))
 
         else:
