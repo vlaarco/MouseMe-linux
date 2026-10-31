@@ -149,6 +149,10 @@ class MainWindow(Gtk.Window):
         self._stop_button_shown = False
 
         self._build_ui()
+
+        # Typing in a field updates Army's run time in the status bar
+        for field in (self._points_text, self._start_delay_text, self._loop_delay_text, self._delay_text, self._repetitions_text):
+            field.connect("changed", lambda _: self._refresh_status())
         self._load_settings()
 
         self.set_resizable(False)
@@ -603,8 +607,26 @@ class MainWindow(Gtk.Window):
         if self._build_menu_check_box.get_active():
             return "Build mode", Color.blue
         if self._army_check_box.get_active():
-            return "Army mode", Color.purple
+            run_time = self._army_run_time
+            return ("Army mode" if run_time is None else f"Army mode ({run_time})"), Color.purple
         return "Normal mode", Color.green
+
+    # How long an Army run will take with the values in the fields, which hold Army's values while Army is on;
+    # None while any of them isn't a valid number
+    @property
+    def _army_run_time(self):
+        try:
+            units, army_delay, close_delay, delay, repetitions = (
+                int(field.get_text().strip())
+                for field in (self._points_text, self._start_delay_text, self._loop_delay_text, self._delay_text, self._repetitions_text)
+            )
+        except ValueError:
+            return None
+
+        if units < 1 or repetitions < 1 or min(army_delay, close_delay, delay) < 0:
+            return None
+
+        return ArmyConfig.format_run_time(ArmyConfig.run_time_ms(units, army_delay, close_delay, delay, repetitions))
 
     # Shows the run's text while a run is going, otherwise the selected mode, unless a message is showing.
     # QI's yellow is unreadable on a light window, so it shows darker here.

@@ -232,6 +232,23 @@ class ArmyConfig:
     # Waited once after Start is pressed, before the first Army click; not shown in the window
     start_delay_ms = 2000
 
+    # How long a run takes, in milliseconds. Each click takes about Delay (moving there, then pressing), so a repetition
+    # is its Army, Delete Unit and Close clicks, each unit's Unit and Delete Confirm clicks, and the waits after each.
+    @staticmethod
+    def run_time_ms(units, army_delay, close_delay, delay, repetitions):
+        repetition = army_delay + close_delay + 4 * delay + 4 * units * delay
+        return ArmyConfig.start_delay_ms + repetitions * repetition
+
+    # A run time as "2h05m", "33m" or "40s"
+    @staticmethod
+    def format_run_time(ms):
+        seconds = round(ms / 1000)
+        if seconds < 60:
+            return f"{seconds}s"
+
+        minutes = round(ms / 60_000)
+        return f"{minutes}m" if minutes < 60 else f"{minutes // 60}h{minutes % 60:02d}m"
+
     # The spots, in calibration order
     ARMY, DELETE_UNIT, UNIT, DELETE_CONFIRM, CLOSE = range(5)
     calibration_prompts = ["Click Army", "Click Delete Unit", "Click Unit", "Click Delete Confirm", "Click Close"]
