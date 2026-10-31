@@ -472,6 +472,10 @@ class MainWindow(Gtk.Window):
             self._calibrate_mode(button)
             return
 
+        # Changing mode ends a QI or Build run, the same as Stop; GBG and Army runs end when the mouse moves to click
+        if self._stop_button_shown:
+            self._engine.post(self._engine.cancel_run)
+
         if button.get_active():
             for other in self._mode_buttons:
                 if other is not button:
