@@ -4,9 +4,12 @@ import cairo
 from gi.repository import Gdk, GLib, Gtk, Pango
 
 from .engine import Color, RunMode, RunSettings
-from .qi_config import ArmyConfig, BuildMenuConfig, QIConfig
+from .qi_config import ArmyConfig, BuildMenuConfig, GoodsConfig, QIConfig
 from .overlay import OverlayPanel
 from .settings import SettingsKey
+
+# The key for normal mode's values among the field values kept while another mode's values are shown
+_NORMAL_FIELDS = "Normal"
 
 # Window position is saved this long after the window stops moving, not on every pixel of a drag
 _SAVE_POSITION_DELAY_MS = 500
@@ -57,6 +60,15 @@ _SWORDS_ICON = [
 ]
 
 # The Tabler "hammer" icon for Build Menu, with its rounded ends approximated
+# The Tabler "package" icon for Goods, moved down 1 to line up with the helmet beside it
+_PACKAGE_ICON = [
+    [(12, 4), (20, 8.5), (20, 17.5), (12, 22), (4, 17.5), (4, 8.5), (12, 4)],
+    [(12, 13), (20, 8.5)],
+    [(12, 13), (12, 22)],
+    [(12, 13), (4, 8.5)],
+    [(16, 6.25), (8, 10.75)],
+]
+
 # A Corinthian helmet for Army, drawn filled: a flat-topped skull with straight sides, narrow eye slits either side of a
 # straight nose guard, and cheek guards that pinch in, flare out and come to points beside the open mouth
 _HELMET_ICON = [[
@@ -115,16 +127,24 @@ class MainWindow(Gtk.Window):
         self._gbg_check_box = self._icon_toggle(_SWORDS_ICON, _SWORDS_ICON)
         self._build_menu_check_box = self._icon_toggle(_HAMMER_ICON, _HAMMER_ICON)
         self._army_check_box = self._icon_toggle(_HELMET_ICON, _HELMET_ICON, filled=True)
+        self._goods_check_box = self._icon_toggle(_PACKAGE_ICON, _PACKAGE_ICON)
 
-        # QI, GBG and Build Menu exclude each other
-        self._mode_buttons = [self._qi_check_box, self._gbg_check_box, self._build_menu_check_box, self._army_check_box]
+        # Goods picks its Number of Goods from the levels, shown in place of the points field
+        self._goods_level_box = Gtk.ComboBoxText()
+        for level in GoodsConfig.levels:
+            self._goods_level_box.append_text(str(level))
+        self._goods_level_box.set_no_show_all(True)
 
-        # Army mode shows its own values in the editable fields, under three different labels; the set not shown is kept here
+        # QI, GBG, Build Menu, Army and Goods exclude each other
+        self._mode_buttons = [self._qi_check_box, self._gbg_check_box, self._build_menu_check_box, self._army_check_box, self._goods_check_box]
+
+        # Army and Goods modes show their own values in the editable fields, under their own labels; each set of values not
+        # shown is kept here, by mode, until swapped back
         self._points_label = Gtk.Label(label="Number of Points", xalign=0)
         self._start_delay_label = Gtk.Label(label="Start Delay (ms)", xalign=0)
         self._loop_delay_label = Gtk.Label(label="Loop Delay (ms)", xalign=0)
-        self._showing_army_fields = False
-        self._hidden_field_values = []
+        self._shown_fields = _NORMAL_FIELDS
+        self._hidden_field_values = {}
         self._pin_button = self._icon_toggle(_PIN_ICON, _PINNED_ICON)
 
         # Arms calibration: the next mode icon clicked is calibrated instead of turned on or off
@@ -150,7 +170,9 @@ class MainWindow(Gtk.Window):
 
         self._build_ui()
 
-        # Typing in a field updates Army's run time in the status bar
+        # Picking a number of goods updates the iterations shown in Repetitions and the status bar, and typing in a field
+        # updates Army's run time in the status bar
+        self._goods_level_box.connect("changed", self._goods_level_changed)
         for field in (self._points_text, self._start_delay_text, self._loop_delay_text, self._delay_text, self._repetitions_text):
             field.connect("changed", lambda _: self._refresh_status())
         self._load_settings()
@@ -228,6 +250,13 @@ class MainWindow(Gtk.Window):
 
     def save_army_targets(self, targets):
         self._save_spots(SettingsKey.army_targets, targets)
+
+    @property
+    def goods_targets(self):
+        return self._saved_spots(SettingsKey.goods_targets, len(GoodsConfig.calibration_prompts))
+
+    def save_goods_targets(self, targets):
+        self._save_spots(SettingsKey.goods_targets, targets)
 
     @property
     def gbg_target(self):
@@ -310,6 +339,9 @@ class MainWindow(Gtk.Window):
         self._army_check_box.set_tooltip_text("Army mode")
         self._icon_bar.pack_start(self._army_check_box, False, False, 0)
 
+        self._goods_check_box.set_tooltip_text("Quantum Incursion Goods mode")
+        self._icon_bar.pack_start(self._goods_check_box, False, False, 0)
+
         self._pin_button.connect("toggled", self._pin_button_changed)
         self._icon_bar.pack_end(self._pin_button, False, False, 0)
 
@@ -332,6 +364,8 @@ class MainWindow(Gtk.Window):
             cell = Gtk.Box()
             cell.pack_start(field, True, True, 0)
             cell.pack_start(gbg_field, True, True, 0)
+            if field is self._points_text:
+                cell.pack_start(self._goods_level_box, True, True, 0)
             grid.attach(cell, 1, i + 1, 1, 1)
 
 
@@ -375,10 +409,15 @@ class MainWindow(Gtk.Window):
         s = self._settings
 
         self._points_text.set_text(str(s[SettingsKey.points]))
-        self._hidden_field_values = [
+        self._hidden_field_values[ArmyConfig.label] = [
             str(s[key]) for key in (SettingsKey.army_units, SettingsKey.army_delay, SettingsKey.army_close_delay,
                                     SettingsKey.army_click_delay, SettingsKey.army_repetitions)
         ]
+
+        # The saved level, or the first level that covers it
+        saved_goods = s[SettingsKey.goods_count]
+        covering = [i for i, level in enumerate(GoodsConfig.levels) if isinstance(saved_goods, int) and level >= saved_goods]
+        self._goods_level_box.set_active(covering[0] if covering else 0)
         self._start_delay_text.set_text(str(s[SettingsKey.start_delay]))
         self._loop_delay_text.set_text(str(s[SettingsKey.loop_delay]))
         self._delay_text.set_text(str(s[SettingsKey.delay]))
@@ -388,6 +427,7 @@ class MainWindow(Gtk.Window):
         self._qi_check_box.set_active(bool(s[SettingsKey.qi]) and not self._gbg_check_box.get_active())
         self._build_menu_check_box.set_active(bool(s[SettingsKey.build_menu]) and not self._qi_check_box.get_active() and not self._gbg_check_box.get_active())
         self._army_check_box.set_active(bool(s[SettingsKey.army]) and not any(b.get_active() for b in self._mode_buttons[:3]))
+        self._goods_check_box.set_active(bool(s[SettingsKey.goods]) and not any(b.get_active() for b in self._mode_buttons[:4]))
         self._update_field_visibility()
 
         self._pin_button.set_active(bool(s[SettingsKey.stay_on_top]))
@@ -491,9 +531,9 @@ class MainWindow(Gtk.Window):
 
     def _update_field_visibility(self):
         self.is_gbg_checked = self._gbg_check_box.get_active()
-        self._swap_army_fields()
+        self._swap_fields()
 
-        # Army mode uses the editable fields too; QI, GBG and Build Menu show GBG's fixed values instead
+        # Army and Goods modes use the editable fields too; QI, GBG and Build Menu show GBG's fixed values instead
         show_normal = not any(button.get_active() for button in (self._qi_check_box, self._gbg_check_box, self._build_menu_check_box))
 
         for field in (self._points_text, self._start_delay_text, self._loop_delay_text, self._delay_text, self._repetitions_text):
@@ -502,24 +542,76 @@ class MainWindow(Gtk.Window):
         for field in (self._points_gbg_text, self._start_delay_gbg_text, self._loop_delay_gbg_text, self._delay_gbg_text, self._repetitions_gbg_text):
             field.set_visible(not show_normal)
 
+        # Goods picks its Number of Goods from the levels in place of typing it
+        is_goods = self._goods_check_box.get_active()
+        self._points_text.set_visible(show_normal and not is_goods)
+        self._goods_level_box.set_visible(is_goods)
+
         self._refresh_status()
 
-    # Shows Army's values and labels in the editable fields while Army mode is on, and normal mode's otherwise
-    def _swap_army_fields(self):
-        is_army = self._army_check_box.get_active()
-        if is_army == self._showing_army_fields:
+    # Shows Army's or Goods' values and labels in the editable fields while that mode is on, and normal mode's otherwise
+    def _swap_fields(self):
+        if self._army_check_box.get_active():
+            mode = ArmyConfig.label
+        elif self._goods_check_box.get_active():
+            mode = GoodsConfig.label
+        else:
+            mode = _NORMAL_FIELDS
+
+        if mode == self._shown_fields:
             return
 
         fields = (self._points_text, self._start_delay_text, self._loop_delay_text, self._delay_text, self._repetitions_text)
-        shown_values = [field.get_text() for field in fields]
-        for field, value in zip(fields, self._hidden_field_values):
+        self._hidden_field_values[self._shown_fields] = [field.get_text() for field in fields]
+        self._shown_fields = mode
+        for field, value in zip(fields, self._hidden_field_values.get(mode, [])):
             field.set_text(value)
 
-        self._hidden_field_values = shown_values
-        self._showing_army_fields = is_army
-        self._points_label.set_text("Number of Units" if is_army else "Number of Points")
+        # Goods only uses Number of Goods: its delays are fixed and Repetitions shows the iterations it makes
+        is_goods = mode == GoodsConfig.label
+        if is_goods:
+            self._start_delay_text.set_text(str(GoodsConfig.start_delay_ms))
+            self._loop_delay_text.set_text("0")
+            self._delay_text.set_text(str(GoodsConfig.delay_ms))
+            self._show_goods_iterations()
+
+        for field in fields[1:]:
+            field.set_sensitive(not is_goods)
+
+        is_army = mode == ArmyConfig.label
+        self._points_label.set_text("Number of Units" if is_army else "Number of Goods" if is_goods else "Number of Points")
         self._start_delay_label.set_text("Army Delay (ms)" if is_army else "Start Delay (ms)")
         self._loop_delay_label.set_text("Close Delay (ms)" if is_army else "Loop Delay (ms)")
+
+    # The Number of Goods picked
+    @property
+    def _goods_level(self):
+        return GoodsConfig.levels[max(self._goods_level_box.get_active(), 0)]
+
+    # How many iterations Goods makes for the Number of Goods picked
+    @property
+    def _goods_iterations(self):
+        return GoodsConfig.iterations(self._goods_level)
+
+    def _goods_level_changed(self, _=None):
+        self._show_goods_iterations()
+        self._refresh_status()
+
+    # While Goods is on, Repetitions shows the iterations for the Number of Goods picked
+    def _show_goods_iterations(self):
+        if self._shown_fields == GoodsConfig.label:
+            self._repetitions_text.set_text(str(self._goods_iterations))
+
+    # Called from the engine thread: moves Number of Goods on to the next level once a run has finished, and remembers
+    # it; the last level stays
+    def next_goods_level(self):
+        GLib.idle_add(self._next_goods_level)
+
+    def _next_goods_level(self):
+        self._goods_level_box.set_active(min(self._goods_level_box.get_active() + 1, len(GoodsConfig.levels) - 1))
+        self._settings[SettingsKey.goods_count] = self._goods_level
+        self._settings.save()
+        return False
 
     # MARK: - Calibration
 
@@ -553,6 +645,8 @@ class MainWindow(Gtk.Window):
             mode = RunMode.QI
         elif button is self._army_check_box:
             mode = RunMode.ARMY
+        elif button is self._goods_check_box:
+            mode = RunMode.GOODS
         elif button is self._gbg_check_box:
             mode = RunMode.GBG
         else:
@@ -609,6 +703,10 @@ class MainWindow(Gtk.Window):
         if self._army_check_box.get_active():
             run_time = self._army_run_time
             return ("Army mode" if run_time is None else f"Army mode ({run_time})"), Color.purple
+        if self._goods_check_box.get_active():
+            iterations = self._goods_iterations
+            cost = iterations * GoodsConfig.iteration_cost
+            return f"Goods mode ({iterations} {'iteration' if iterations == 1 else 'iterations'}, {cost:,})", Color.orange
         return "Normal mode", Color.green
 
     # How long an Army run will take with the values in the fields, which hold Army's values while Army is on;
@@ -662,6 +760,7 @@ class MainWindow(Gtk.Window):
         is_qi = self._qi_check_box.get_active()
         is_build_menu = self._build_menu_check_box.get_active()
         is_army = self._army_check_box.get_active()
+        is_goods = self._goods_check_box.get_active()
         settings = RunSettings()
 
         def parse(field, minimum=None):
@@ -710,6 +809,10 @@ class MainWindow(Gtk.Window):
             # In Army mode, points is the number of units, start_delay is Army Delay and loop_delay is Close Delay
             settings = RunSettings(*values)
 
+        elif is_goods:
+            # In Goods mode, points is the number of goods and repetitions the iterations that make them; its delays are fixed
+            settings = RunSettings(self._goods_level, GoodsConfig.start_delay_ms, 0, GoodsConfig.delay_ms, self._goods_iterations)
+
         elif not is_qi and not is_build_menu:
             values = fields([
                 (self._points_text, 1, "Please enter a number of 1 or more for Number of Points."),
@@ -724,8 +827,10 @@ class MainWindow(Gtk.Window):
 
         s = self._settings
 
-        # Normal and Army modes each save their own values; GBG uses fixed values and QI and Build Menu use none
-        if is_army:
+        # Normal, Army and Goods modes each save their own values; GBG uses fixed values and QI and Build Menu use none
+        if is_goods:
+            s[SettingsKey.goods_count] = settings.points
+        elif is_army:
             s[SettingsKey.army_units] = settings.points
             s[SettingsKey.army_delay] = settings.start_delay
             s[SettingsKey.army_close_delay] = settings.loop_delay
@@ -742,9 +847,10 @@ class MainWindow(Gtk.Window):
         s[SettingsKey.qi] = is_qi
         s[SettingsKey.build_menu] = is_build_menu
         s[SettingsKey.army] = is_army
+        s[SettingsKey.goods] = is_goods
         s.save()
 
-        # QI, GBG and Army need their spots before they can run; calibrating brings the window back, ready for Start
+        # QI, GBG, Army and Goods need their spots before they can run; calibrating brings the window back, ready for Start
         if is_qi and self.qi_spots is None:
             self._engine.post(self._engine.calibrate, RunMode.QI)
             return
@@ -757,7 +863,23 @@ class MainWindow(Gtk.Window):
             self._engine.post(self._engine.calibrate, RunMode.ARMY)
             return
 
-        mode = RunMode.GBG if is_gbg else RunMode.QI if is_qi else RunMode.BUILD_MENU if is_build_menu else RunMode.ARMY if is_army else RunMode.NORMAL
+        # Goods always calibrates first: those clicks start each tab's first production, and the run follows once it's saved
+        if is_goods:
+            self._engine.post(self._engine.calibrate, RunMode.GOODS, lambda: self._engine.start(RunMode.GOODS, settings))
+            return
+
+        if is_gbg:
+            mode = RunMode.GBG
+        elif is_qi:
+            mode = RunMode.QI
+        elif is_build_menu:
+            mode = RunMode.BUILD_MENU
+        elif is_army:
+            mode = RunMode.ARMY
+        elif is_goods:
+            mode = RunMode.GOODS
+        else:
+            mode = RunMode.NORMAL
         self._engine.post(self._engine.start, mode, settings)
 
     def _show_message(self, text):

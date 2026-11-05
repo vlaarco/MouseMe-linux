@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 
 from .mouse import Mouse
-from .qi_config import ArmyConfig, BuildMenuConfig, GbgConfig, Key, QIConfig, QIStep, Spot
+from .qi_config import ArmyConfig, BuildMenuConfig, GbgConfig, GoodsConfig, Key, QIConfig, QIStep, Spot
 
 
 @dataclass
@@ -25,6 +25,7 @@ class RunMode(enum.Enum):
     QI = "qi"
     BUILD_MENU = "build_menu"
     ARMY = "army"
+    GOODS = "goods"
 
 
 class Color:
@@ -33,6 +34,7 @@ class Color:
     green = "#28cd41"
     blue = "#0a84ff"
     purple = "#af52de"
+    orange = "#ff9500"
 
 
 class _Stopped(Exception):
@@ -173,14 +175,20 @@ class Engine:
             overlay.set(str(settings.points * settings.repetitions), Color.purple)
             self.loop.create_task(self._run_army(self._current_run_id, settings))
 
+        elif mode == RunMode.GOODS:
+            # Counts down the iterations left after the one in progress, so it shows 0 during the last; repetitions holds the iterations
+            overlay.set(str(settings.repetitions - 1), Color.orange)
+            self.loop.create_task(self._run_goods(self._current_run_id, settings.repetitions))
+
         else:
             overlay.set(str(settings.points), Color.green)
 
             self._recording = True
 
     # Calibrates a mode's spots from the calibrate button: the window minimizes while each spot is clicked in the game,
-    # then comes back. X cancels and keeps the old spots. Every mode but normal can be calibrated.
-    def calibrate(self, mode):
+    # then comes back. X cancels and keeps the old spots. Every mode but normal can be calibrated. Once saved, after_save
+    # runs in place of the "Calibration saved" message.
+    def calibrate(self, mode, after_save=None):
         if mode == RunMode.QI:
             async def record(overlay):
                 return await self._calibrate_targets([Spot.prompts[spot] for spot in QIConfig.calibration_spots], overlay)
@@ -206,6 +214,11 @@ class Engine:
                 return await self._calibrate_targets(ArmyConfig.calibration_prompts, overlay)
 
             save = self.controller.save_army_targets
+        elif mode == RunMode.GOODS:
+            async def record(overlay):
+                return await self._calibrate_targets(GoodsConfig.calibration_prompts, overlay)
+
+            save = self.controller.save_goods_targets
         else:
             return
 
@@ -214,9 +227,9 @@ class Engine:
 
         self._buffered_qi_key = None
         self._set_calibration_active(True)
-        self.loop.create_task(self._run_calibration(self._current_run_id, overlay, record, save))
+        self.loop.create_task(self._run_calibration(self._current_run_id, overlay, record, save, after_save))
 
-    async def _run_calibration(self, run_id, overlay, record, save):
+    async def _run_calibration(self, run_id, overlay, record, save, after_save):
         targets = None
         try:
             targets = await record(overlay)
@@ -225,8 +238,13 @@ class Engine:
         finally:
             if run_id == self._current_run_id:
                 self._set_calibration_active(False)
-                self._stop_task()
-                self.controller.show_status("Calibration saved" if targets is not None else "Calibration cancelled")
+
+                # Going straight on to after_save keeps the window minimized, since bringing it back would end the new run
+                if targets is not None and after_save is not None:
+                    after_save()
+                else:
+                    self._stop_task()
+                    self.controller.show_status("Calibration saved" if targets is not None else "Calibration cancelled")
 
     # Ends whatever was running, shows a fresh overlay and minimizes the window
     def _begin_run(self):
@@ -814,6 +832,52 @@ class Engine:
 
         if not is_stale():
             self._stop_task()
+
+    # MARK: - Goods
+
+    # After the start delay, each iteration clicks each tab, then its Ropery twice (once to collect the goods, then again
+    # to select it) and its Loads of Rope, waiting the Goods delay after each click. The last iteration only collects,
+    # clicking each tab and its Ropery once. Moving the mouse stops it; the overlay
+    # counts down the iterations left. Once every iteration is done, Number of Goods moves on to the next level.
+    async def _run_goods(self, run_id, iterations):
+        # A newer start owns the overlay; exit without touching it
+        def is_stale():
+            return run_id != self._current_run_id
+
+        targets = self.controller.goods_targets
+        if targets is None:
+            self._stop_task()
+            return
+
+        await self._sleep(GoodsConfig.start_delay_ms)
+        start_position = self.mouse.location
+
+        # Calibrated as each tab's Tab, Ropery and Loads of Rope
+        clicks = [spot for i in range(0, len(targets) - 2, 3) for spot in (targets[i], targets[i + 1], targets[i + 1], targets[i + 2])]
+        last_clicks = [spot for i in range(0, len(targets) - 2, 3) for spot in (targets[i], targets[i + 1])]
+
+        stopped = False
+        for iteration in range(max(iterations, 0)):
+            if self.overlay is not None:
+                self.overlay.set_text(str(iterations - iteration - 1))
+
+            for target in last_clicks if iteration == iterations - 1 else clicks:
+                if is_stale() or self.overlay is None or self._user_moved_mouse(start_position, targets):
+                    stopped = True
+                    break
+
+                await self._human_click(target, GoodsConfig.delay_ms, False)
+                await self._sleep(GoodsConfig.delay_ms)
+
+            if stopped or is_stale() or self.overlay is None:
+                stopped = True
+                break
+
+        if not is_stale():
+            self._stop_task()
+
+            if not stopped:
+                self.controller.next_goods_level()
 
     # Puts "QI" back after a one-off action's label, unless a newer label or a newer run has taken over by then
     def _revert_to_qi_label_later(self, run_id):

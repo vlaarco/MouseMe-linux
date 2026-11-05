@@ -25,6 +25,9 @@ class SettingsKey:
     army_click_delay = "ArmyClickDelay"
     army_repetitions = "ArmyRepetitions"
     army_targets = "ArmyTargets"
+    goods = "Goods"
+    goods_count = "GoodsCount"
+    goods_targets = "GoodsTargets"
     window_position = "WindowPosition"
 
     defaults = {
@@ -47,6 +50,9 @@ class SettingsKey:
         army_click_delay: 350,
         army_repetitions: 1,
         army_targets: None,
+        goods: False,
+        goods_count: 60,
+        goods_targets: None,
         window_position: None,
     }
 

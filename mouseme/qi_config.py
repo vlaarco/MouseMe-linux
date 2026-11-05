@@ -252,3 +252,26 @@ class ArmyConfig:
     # The spots, in calibration order
     ARMY, DELETE_UNIT, UNIT, DELETE_CONFIRM, CLOSE = range(5)
     calibration_prompts = ["Click Army", "Click Delete Unit", "Click Unit", "Click Delete Confirm", "Click Close"]
+
+
+# Goods mode: makes Quantum Incursion goods. Calibrating clicks a tab, its Ropery and its Loads of Rope, for each of three
+# tabs, which starts the first production; each iteration then collects one and starts the next.
+class GoodsConfig:
+    label = "Goods"
+    start_delay_ms = 2000
+    delay_ms = 250
+    goods_per_iteration = 20
+
+    # What each production costs in the game; the status bar shows the total, counting the one calibration starts
+    iteration_cost = 56_000
+
+    calibration_prompts = [prompt for tab in ("Click Tab", "Click 2nd Tab", "Click 3rd Tab") for prompt in (tab, "Click Ropery", "Click Loads of Rope")]
+
+    # The numbers of goods the game asks for, level by level; a finished run moves on to the next
+    levels = [60, 90, 130, 180, 240, 310, 390, 480, 580, 700]
+
+    # Each collection gives goods_per_iteration goods, rounded up to cover them all; each iteration collects once. Calibration
+    # starts the first production and every iteration but the last starts another, so there are as many productions.
+    @staticmethod
+    def iterations(goods):
+        return -(-goods // GoodsConfig.goods_per_iteration)
