@@ -47,6 +47,12 @@ class Spot:
     flat_mode = "FlatMode"
     cancel = "Cancel"
 
+    # A settlement's toolbar buttons sit elsewhere than QI's, so Build has its own
+    settlement_sell = "SettlementSell"
+    settlement_move = "SettlementMove"
+    settlement_flat_mode = "SettlementFlatMode"
+    settlement_cancel = "SettlementCancel"
+
     prompts = {
         build: "Click Build",
         top_left: "Click Top Left",
@@ -63,6 +69,10 @@ class Spot:
         move: "Click Move",
         flat_mode: "Click Flat Mode",
         cancel: "Click Cancel",
+        settlement_sell: "Click Sell",
+        settlement_move: "Click Move",
+        settlement_flat_mode: "Click Flat Mode",
+        settlement_cancel: "Click Cancel",
     }
 
 
@@ -199,7 +209,8 @@ class BuildMenuConfig:
     # and the Sell, Move, Flat Mode and Cancel toolbar buttons
     key_spots = {
         Key.z: Spot.build, Key.one: Spot.top_left, Key.two: Spot.top_right, Key.three: Spot.bottom_left,
-        Key.four: Spot.bottom_right, Key.s: Spot.sell, Key.v: Spot.move, Key.f: Spot.flat_mode, Key.escape: Spot.cancel,
+        Key.four: Spot.bottom_right, Key.s: Spot.settlement_sell, Key.v: Spot.settlement_move, Key.f: Spot.settlement_flat_mode,
+        Key.escape: Spot.settlement_cancel,
     }
 
     # Shift with 1 to 4 clicks the settlement build menu's four category tabs instead, counted from the top
@@ -208,7 +219,7 @@ class BuildMenuConfig:
     # In calibration order; the Residential and Expansions (4th) tabs give the spot of every tab
     calibration_spots = [
         Spot.build, Spot.top_left, Spot.top_right, Spot.bottom_left, Spot.bottom_right, Spot.residential_tab, Spot.fourth_tab,
-        Spot.sell, Spot.move, Spot.flat_mode, Spot.cancel,
+        Spot.settlement_sell, Spot.settlement_move, Spot.settlement_flat_mode, Spot.settlement_cancel,
     ]
     calibration_prompts = ["Click Expansions Tab" if spot == Spot.fourth_tab else Spot.prompts[spot] for spot in calibration_spots]
 
