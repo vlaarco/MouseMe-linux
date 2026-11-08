@@ -122,7 +122,7 @@ class MainWindow(Gtk.Window):
         self._start_button = Gtk.Button(label="Start")
 
         # The icon bar along the top of the window: mode icons on the left, window controls on the right
-        self._icon_bar = Gtk.Box(spacing=6)
+        self._icon_bar = Gtk.Box(spacing=0)
         self._qi_check_box = self._icon_toggle(_ATOM_ICON, _ATOM_ICON)
         self._gbg_check_box = self._icon_toggle(_SWORDS_ICON, _SWORDS_ICON)
         self._build_menu_check_box = self._icon_toggle(_HAMMER_ICON, _HAMMER_ICON)
