@@ -356,9 +356,6 @@ class MainWindow(Gtk.Window):
     def _build_ui(self):
         grid = Gtk.Grid(column_spacing=8, row_spacing=8, margin=12)
 
-        self._qi_check_box.set_tooltip_text("Quantum Incursions mode")
-        self._icon_bar.pack_start(self._qi_check_box, False, False, 0)
-
         self._gbg_check_box.set_tooltip_text("Guild Battlegrounds mode")
         self._icon_bar.pack_start(self._gbg_check_box, False, False, 0)
 
@@ -367,6 +364,9 @@ class MainWindow(Gtk.Window):
 
         self._army_check_box.set_tooltip_text("Army mode")
         self._icon_bar.pack_start(self._army_check_box, False, False, 0)
+
+        self._qi_check_box.set_tooltip_text("Quantum Incursions mode")
+        self._icon_bar.pack_start(self._qi_check_box, False, False, 0)
 
         self._goods_check_box.set_tooltip_text("Quantum Incursion Goods mode")
         self._icon_bar.pack_start(self._goods_check_box, False, False, 0)
