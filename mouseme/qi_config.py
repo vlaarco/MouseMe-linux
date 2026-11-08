@@ -265,6 +265,23 @@ class ArmyConfig:
     calibration_prompts = ["Click Army", "Click Delete Unit", "Click Unit", "Click Delete Confirm", "Click Close"]
 
 
+# Refine mode: refines a Great Building. Each R clicks Refine then OK, Repetitions times, waiting Loop Delay after Refine
+# and Delay after OK, then clicks the GB dropdown
+class RefineConfig:
+    label = "Refine"
+
+    # The spots, in calibration order
+    DROPDOWN, REFINE, OK = range(3)
+    calibration_prompts = ["Click GB Dropdown", "Click Refine", "Click OK"]
+
+    # R runs the clicks and X stops Refine mode
+    keys = [Key.r, Key.x]
+
+    default_loop_delay_ms = 400
+    default_delay_ms = 100
+    default_repetitions = 1
+
+
 # Goods mode: makes Quantum Incursion goods. Calibrating clicks a tab, its Ropery and its Loads of Rope, for each of three
 # tabs, which starts the first production; each iteration then collects one and starts the next.
 class GoodsConfig:

@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 
 from .mouse import Mouse
-from .qi_config import ArmyConfig, BuildMenuConfig, GbgConfig, GoodsConfig, Key, QIConfig, QIStep, Spot
+from .qi_config import ArmyConfig, BuildMenuConfig, GbgConfig, GoodsConfig, Key, QIConfig, QIStep, RefineConfig, Spot
 
 
 @dataclass
@@ -26,6 +26,7 @@ class RunMode(enum.Enum):
     BUILD_MENU = "build_menu"
     ARMY = "army"
     GOODS = "goods"
+    REFINE = "refine"
 
 
 class Color:
@@ -35,6 +36,7 @@ class Color:
     blue = "#0a84ff"
     purple = "#af52de"
     orange = "#ff9500"
+    teal = "#30b0c7"
 
 
 class _Stopped(Exception):
@@ -75,6 +77,7 @@ class Engine:
 
         self._qi_active = False
         self._build_menu_active = False
+        self._refine_active = False
 
         # Calibrating from the calibrate button, outside any mode; only X is captured, to cancel
         self._calibration_active = False
@@ -170,6 +173,19 @@ class Engine:
             self.controller.show_stop_button(True)
             self.loop.create_task(self._run_build_menu(self._current_run_id))
 
+        elif mode == RunMode.REFINE:
+            # Nothing to click until the GB dropdown, Refine and OK have been calibrated
+            if self.controller.refine_targets is None:
+                self._stop_task()
+                return
+
+            overlay.set(RefineConfig.label, Color.teal)
+
+            self._buffered_qi_key = None
+            self._set_refine_active(True)
+            self.controller.show_stop_button(True)
+            self.loop.create_task(self._run_refine(self._current_run_id, settings))
+
         elif mode == RunMode.ARMY:
             # Counts down every unit left across all repetitions
             overlay.set(str(settings.points * settings.repetitions), Color.purple)
@@ -219,6 +235,11 @@ class Engine:
                 return await self._calibrate_targets(GoodsConfig.calibration_prompts, overlay)
 
             save = self.controller.save_goods_targets
+        elif mode == RunMode.REFINE:
+            async def record(overlay):
+                return await self._calibrate_targets(RefineConfig.calibration_prompts, overlay)
+
+            save = self.controller.save_refine_targets
         else:
             return
 
@@ -251,6 +272,7 @@ class Engine:
         self._current_run_id += 1
         self._set_qi_active(False)
         self._set_build_menu_active(False)
+        self._set_refine_active(False)
         self._set_calibration_active(False)
         self._recording = False
         self._close_overlay()
@@ -286,6 +308,7 @@ class Engine:
         self._release_mouse_input()
         self._set_qi_active(False)
         self._set_build_menu_active(False)
+        self._set_refine_active(False)
         self._set_calibration_active(False)
         self._cancel_pending_key()
         self._cancel_calibration()
@@ -299,6 +322,11 @@ class Engine:
         if active != self._build_menu_active:
             self._build_menu_active = active
             self.event_tap.grab_keys(BuildMenuConfig.keys if active else [])
+
+    def _set_refine_active(self, active):
+        if active != self._refine_active:
+            self._refine_active = active
+            self.event_tap.grab_keys(RefineConfig.keys if active else [])
 
     def _set_calibration_active(self, active):
         if active != self._calibration_active:
@@ -339,6 +367,8 @@ class Engine:
             active_keys = QIConfig.keys
         elif self._build_menu_active:
             active_keys = BuildMenuConfig.keys
+        elif self._refine_active:
+            active_keys = RefineConfig.keys
         elif self._calibration_active:
             active_keys = [Key.x]
         else:
@@ -656,6 +686,67 @@ class Engine:
                 return
 
             # Only return the cursor if a click sequence took it over
+            if self._suppress_mouse_input:
+                await self._return_cursor(current_position, run_id)
+
+        self._stop_task()
+
+    # MARK: - Refine
+
+    async def _run_refine(self, run_id, settings):
+        try:
+            await self._refine_clicks(run_id, settings)
+        finally:
+            # Never leave physical mouse input blocked or keys captured once the Refine loop ends
+            self._release_mouse_input(run_id)
+
+            if run_id == self._current_run_id:
+                self._set_refine_active(False)
+
+    # Each R clicks Refine, waits Loop Delay, clicks OK and waits Delay, Repetitions times, then clicks the GB dropdown;
+    # X ends the run
+    async def _refine_clicks(self, run_id, settings):
+        # A newer start owns the overlay; exit without touching it
+        def is_stale():
+            return run_id != self._current_run_id
+
+        while True:
+            if is_stale():
+                return
+
+            if self.overlay is None:
+                break
+
+            try:
+                key = await self._wait_for_key()
+            except _Stopped:
+                return
+
+            if is_stale():
+                return
+
+            if self.overlay is None:
+                break
+
+            if key == Key.x:
+                self._stop_task()
+                return
+
+            targets = self.controller.refine_targets
+            if key != Key.r or targets is None:
+                continue
+
+            current_position = self.mouse.location
+            for _ in range(max(settings.repetitions, 0)):
+                await self._perform_click_sequence(run_id, [targets[RefineConfig.REFINE]], settings.loop_delay)
+                await self._perform_click_sequence(run_id, [targets[RefineConfig.OK]], settings.delay)
+            await self._perform_click_sequence(run_id, [targets[RefineConfig.DROPDOWN]], 0)
+
+            # A newer run owns the cursor now; just let go of any blocking this run started
+            if is_stale():
+                self._release_mouse_input(run_id)
+                return
+
             if self._suppress_mouse_input:
                 await self._return_cursor(current_position, run_id)
 

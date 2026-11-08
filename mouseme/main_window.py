@@ -5,7 +5,7 @@ import cairo
 from gi.repository import Gdk, GLib, Gtk, Pango
 
 from .engine import Color, RunMode, RunSettings
-from .qi_config import ArmyConfig, BuildMenuConfig, GoodsConfig, QIConfig
+from .qi_config import ArmyConfig, BuildMenuConfig, GoodsConfig, QIConfig, RefineConfig
 from .overlay import OverlayPanel
 from .settings import SettingsKey
 
@@ -72,6 +72,21 @@ _SWORDS_ICON = [
 ]
 
 # The Tabler "hammer" icon for Build Menu, with its rounded ends approximated
+# The Tabler "sparkles" icon for Refine: a large four-pointed star with curved sides and two small ones
+_SPARKLES_ICON = [
+    [(16, 18), (16.765, 18.152), (17.414, 18.586), (17.848, 19.235), (18, 20), (18.152, 19.235), (18.586, 18.586), (19.235, 18.152),
+    (20, 18), (19.235, 17.848), (18.586, 17.414), (18.152, 16.765), (18, 16), (17.848, 16.765), (17.414, 17.414), (16.765, 17.848),
+    (16, 18)],
+    [(16, 6), (16.765, 6.152), (17.414, 6.586), (17.848, 7.235), (18, 8), (18.152, 7.235), (18.586, 6.586), (19.235, 6.152),
+    (20, 6), (19.235, 5.848), (18.586, 5.414), (18.152, 4.765), (18, 4), (17.848, 4.765), (17.414, 5.414), (16.765, 5.848),
+    (16, 6)],
+    [(3, 12), (4.171, 12.115), (5.296, 12.457), (6.333, 13.011), (7.243, 13.757), (7.989, 14.667), (8.543, 15.704), (8.885, 16.829),
+    (9, 18), (9.115, 16.829), (9.457, 15.704), (10.011, 14.667), (10.757, 13.757), (11.667, 13.011), (12.704, 12.457), (13.829, 12.115),
+    (15, 12), (13.829, 11.885), (12.704, 11.543), (11.667, 10.989), (10.757, 10.243), (10.011, 9.333), (9.457, 8.296), (9.115, 7.171),
+    (9, 6), (8.885, 7.171), (8.543, 8.296), (7.989, 9.333), (7.243, 10.243), (6.333, 10.989), (5.296, 11.543), (4.171, 11.885),
+    (3, 12)],
+]
+
 # The Tabler "package" icon for Goods, moved down 1 to line up with the helmet beside it
 _PACKAGE_ICON = [
     [(12, 4), (20, 8.5), (20, 17.5), (12, 22), (4, 17.5), (4, 8.5), (12, 4)],
@@ -140,6 +155,7 @@ class MainWindow(Gtk.Window):
         self._build_menu_check_box = self._icon_toggle(_HAMMER_ICON, _HAMMER_ICON)
         self._army_check_box = self._icon_toggle(_HELMET_ICON, _HELMET_ICON, filled=True)
         self._goods_check_box = self._icon_toggle(_PACKAGE_ICON, _PACKAGE_ICON)
+        self._refine_check_box = self._icon_toggle(_SPARKLES_ICON, _SPARKLES_ICON)
 
         # Goods picks its Number of Goods from the levels, shown in place of the points field
         self._goods_level_box = Gtk.ComboBoxText()
@@ -147,8 +163,9 @@ class MainWindow(Gtk.Window):
             self._goods_level_box.append_text(str(level))
         self._goods_level_box.set_no_show_all(True)
 
-        # QI, GBG, Build Menu, Army and Goods exclude each other
-        self._mode_buttons = [self._qi_check_box, self._gbg_check_box, self._build_menu_check_box, self._army_check_box, self._goods_check_box]
+        # QI, GBG, Build Menu, Army, Goods and Refine exclude each other
+        self._mode_buttons = [self._qi_check_box, self._gbg_check_box, self._build_menu_check_box, self._army_check_box, self._goods_check_box,
+                              self._refine_check_box]
 
         # Army and Goods modes show their own values in the editable fields, under their own labels; each set of values not
         # shown is kept here, by mode, until swapped back
@@ -281,6 +298,13 @@ class MainWindow(Gtk.Window):
         self._save_spots(SettingsKey.army_targets, targets)
 
     @property
+    def refine_targets(self):
+        return self._saved_spots(SettingsKey.refine_targets, len(RefineConfig.calibration_prompts))
+
+    def save_refine_targets(self, targets):
+        self._save_spots(SettingsKey.refine_targets, targets)
+
+    @property
     def goods_targets(self):
         return self._saved_spots(SettingsKey.goods_targets, len(GoodsConfig.calibration_prompts))
 
@@ -358,6 +382,9 @@ class MainWindow(Gtk.Window):
 
         self._gbg_check_box.set_tooltip_text("Guild Battlegrounds mode")
         self._icon_bar.pack_start(self._gbg_check_box, False, False, 0)
+
+        self._refine_check_box.set_tooltip_text("Refine mode")
+        self._icon_bar.pack_start(self._refine_check_box, False, False, 0)
 
         self._build_menu_check_box.set_tooltip_text("Build Menu mode")
         self._icon_bar.pack_start(self._build_menu_check_box, False, False, 0)
@@ -453,6 +480,11 @@ class MainWindow(Gtk.Window):
                                     SettingsKey.army_click_delay, SettingsKey.army_repetitions)
         ]
 
+        # Refine uses only Loop Delay, Delay and Repetitions; Number of Points and Start Delay show greyed out
+        self._hidden_field_values[RefineConfig.label] = ["0", "0"] + [
+            str(s[key]) for key in (SettingsKey.refine_loop_delay, SettingsKey.refine_delay, SettingsKey.refine_repetitions)
+        ]
+
         # The saved level, or the first level that covers it
         saved_goods = s[SettingsKey.goods_count]
         covering = [i for i, level in enumerate(GoodsConfig.levels) if isinstance(saved_goods, int) and level >= saved_goods]
@@ -467,6 +499,7 @@ class MainWindow(Gtk.Window):
         self._build_menu_check_box.set_active(bool(s[SettingsKey.build_menu]) and not self._qi_check_box.get_active() and not self._gbg_check_box.get_active())
         self._army_check_box.set_active(bool(s[SettingsKey.army]) and not any(b.get_active() for b in self._mode_buttons[:3]))
         self._goods_check_box.set_active(bool(s[SettingsKey.goods]) and not any(b.get_active() for b in self._mode_buttons[:4]))
+        self._refine_check_box.set_active(bool(s[SettingsKey.refine]) and not any(b.get_active() for b in self._mode_buttons[:5]))
         self._update_field_visibility()
 
         self._pin_button.set_active(bool(s[SettingsKey.stay_on_top]))
@@ -577,7 +610,7 @@ class MainWindow(Gtk.Window):
             return
 
         # QI and Build start as soon as their icon turns them on, but not when the saved modes load at launch
-        auto_start = button.get_active() and button in (self._qi_check_box, self._build_menu_check_box) and self._settings_loaded
+        auto_start = button.get_active() and button in (self._qi_check_box, self._build_menu_check_box, self._refine_check_box) and self._settings_loaded
 
         # Changing mode ends a QI or Build run, the same as Stop; GBG and Army runs end when the mouse moves to click.
         # Going straight to QI or Build skips this: the new run replaces the old one, so the button doesn't flicker to Start
@@ -625,6 +658,8 @@ class MainWindow(Gtk.Window):
             mode = ArmyConfig.label
         elif self._goods_check_box.get_active():
             mode = GoodsConfig.label
+        elif self._refine_check_box.get_active():
+            mode = RefineConfig.label
         else:
             mode = _NORMAL_FIELDS
 
@@ -647,6 +682,11 @@ class MainWindow(Gtk.Window):
 
         for field in fields[1:]:
             field.set_sensitive(not is_goods)
+
+        # Refine only uses Loop Delay, Delay and Repetitions
+        is_refine = mode == RefineConfig.label
+        self._points_text.set_sensitive(not is_refine)
+        self._start_delay_text.set_sensitive(not is_refine and not is_goods)
 
         is_army = mode == ArmyConfig.label
         self._points_label.set_text("Number of Units" if is_army else "Number of Goods" if is_goods else "Number of Points")
@@ -719,6 +759,8 @@ class MainWindow(Gtk.Window):
             mode = RunMode.GOODS
         elif button is self._gbg_check_box:
             mode = RunMode.GBG
+        elif button is self._refine_check_box:
+            mode = RunMode.REFINE
         else:
             mode = RunMode.BUILD_MENU
         self._engine.post(self._engine.calibrate, mode)
@@ -770,6 +812,8 @@ class MainWindow(Gtk.Window):
             return "GBG mode", Color.red
         if self._build_menu_check_box.get_active():
             return "Build mode", Color.blue
+        if self._refine_check_box.get_active():
+            return "Refine mode", Color.teal
         if self._army_check_box.get_active():
             run_time = self._army_run_time
             return ("Army mode" if run_time is None else f"Army mode ({run_time})"), Color.purple
@@ -845,6 +889,7 @@ class MainWindow(Gtk.Window):
         is_build_menu = self._build_menu_check_box.get_active()
         is_army = self._army_check_box.get_active()
         is_goods = self._goods_check_box.get_active()
+        is_refine = self._refine_check_box.get_active()
         settings = RunSettings()
 
         def parse(field, minimum=None):
@@ -893,6 +938,16 @@ class MainWindow(Gtk.Window):
             # In Army mode, points is the number of units, start_delay is Army Delay and loop_delay is Close Delay
             settings = RunSettings(*values)
 
+        elif is_refine:
+            values = fields([
+                (self._loop_delay_text, 0, "Please enter a number of 0 or more for Loop Delay."),
+                (self._delay_text, 0, "Please enter a number of 0 or more for Delay."),
+                (self._repetitions_text, 1, "Please enter a number of 1 or more for Repetitions."),
+            ])
+            if values is None:
+                return
+            settings = RunSettings(0, 0, *values)
+
         elif is_goods:
             # In Goods mode, points is the number of goods and repetitions the iterations that make them; its delays are fixed
             settings = RunSettings(self._goods_level, GoodsConfig.start_delay_ms, 0, GoodsConfig.delay_ms, self._goods_iterations)
@@ -911,8 +966,12 @@ class MainWindow(Gtk.Window):
 
         s = self._settings
 
-        # Normal, Army and Goods modes each save their own values; GBG uses fixed values and QI and Build Menu use none
-        if is_goods:
+        # Normal, Army, Goods and Refine modes each save their own values; GBG uses fixed values and QI and Build Menu use none
+        if is_refine:
+            s[SettingsKey.refine_loop_delay] = settings.loop_delay
+            s[SettingsKey.refine_delay] = settings.delay
+            s[SettingsKey.refine_repetitions] = settings.repetitions
+        elif is_goods:
             s[SettingsKey.goods_count] = settings.points
         elif is_army:
             s[SettingsKey.army_units] = settings.points
@@ -932,6 +991,7 @@ class MainWindow(Gtk.Window):
         s[SettingsKey.build_menu] = is_build_menu
         s[SettingsKey.army] = is_army
         s[SettingsKey.goods] = is_goods
+        s[SettingsKey.refine] = is_refine
         s.save()
 
         # QI, GBG, Army and Goods need their spots before they can run; calibrating brings the window back, ready for Start
@@ -945,6 +1005,10 @@ class MainWindow(Gtk.Window):
 
         if is_army and self.army_targets is None:
             self._engine.post(self._engine.calibrate, RunMode.ARMY)
+            return
+
+        if is_refine and self.refine_targets is None:
+            self._engine.post(self._engine.calibrate, RunMode.REFINE)
             return
 
         # Goods always calibrates first: those clicks start each tab's first production, and the run follows once it's saved
@@ -962,6 +1026,8 @@ class MainWindow(Gtk.Window):
             mode = RunMode.ARMY
         elif is_goods:
             mode = RunMode.GOODS
+        elif is_refine:
+            mode = RunMode.REFINE
         else:
             mode = RunMode.NORMAL
         self._engine.post(self._engine.start, mode, settings)

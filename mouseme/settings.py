@@ -29,6 +29,11 @@ class SettingsKey:
     goods = "Goods"
     goods_count = "GoodsCount"
     goods_targets = "GoodsTargets"
+    refine = "Refine"
+    refine_loop_delay = "RefineLoopDelay"
+    refine_delay = "RefineDelay"
+    refine_repetitions = "RefineRepetitions"
+    refine_targets = "RefineTargets"
     window_position = "WindowPosition"
 
     defaults = {
@@ -55,6 +60,11 @@ class SettingsKey:
         goods: False,
         goods_count: 60,
         goods_targets: None,
+        refine: False,
+        refine_loop_delay: 400,
+        refine_delay: 100,
+        refine_repetitions: 1,
+        refine_targets: None,
         window_position: None,
     }
 
