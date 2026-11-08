@@ -16,6 +16,17 @@ _NORMAL_FIELDS = "Normal"
 _SAVE_POSITION_DELAY_MS = 500
 
 # The Tabler "pin" (off, tilted) and "pinned" (on, upright) icons, as lines on a 24 x 24 grid
+# The Tabler "layout-navbar-collapse" (shrink) and "layout-navbar-expand" (restore) icons: a rounded window with a top bar
+# and an arrow under it
+_NAVBAR_WINDOW = [
+    (6, 4), (18, 4), (18.765, 4.152), (19.414, 4.586), (19.848, 5.235), (20, 6),
+    (20, 18), (19.848, 18.765), (19.414, 19.414), (18.765, 19.848), (18, 20),
+    (6, 20), (5.235, 19.848), (4.586, 19.414), (4.152, 18.765), (4, 18),
+    (4, 6), (4.152, 5.235), (4.586, 4.586), (5.235, 4.152), (6, 4),
+]
+_NAVBAR_COLLAPSE_ICON = [_NAVBAR_WINDOW, [(4, 9), (20, 9)], [(10, 16), (12, 14), (14, 16)]]
+_NAVBAR_EXPAND_ICON = [_NAVBAR_WINDOW, [(4, 9), (20, 9)], [(10, 14), (12, 16), (14, 14)]]
+
 _PIN_ICON = [
     [(15, 4.5), (11, 8.5), (7, 10), (5.5, 11.5), (12.5, 18.5), (14, 17), (15.5, 13), (19.5, 9)],
     [(9, 15), (4.5, 19.5)],
@@ -147,6 +158,10 @@ class MainWindow(Gtk.Window):
         self._shown_fields = _NORMAL_FIELDS
         self._hidden_field_values = {}
         self._pin_button = self._icon_toggle(_PIN_ICON, _PINNED_ICON)
+
+        # Shrinks the window to the icon bar, Start button and status bar, and back; each field row's label and fields
+        self._compact_button = self._icon_toggle(_NAVBAR_COLLAPSE_ICON, _NAVBAR_EXPAND_ICON)
+        self._field_rows = []
 
         # Arms calibration: the next mode icon clicked is calibrated instead of turned on or off
         self._calibrate_button = self._icon_toggle(_CROSSHAIR_ICON, _CROSSHAIR_ICON)
@@ -359,6 +374,9 @@ class MainWindow(Gtk.Window):
         self._pin_button.connect("toggled", self._pin_button_changed)
         self._icon_bar.pack_end(self._pin_button, False, False, 0)
 
+        self._compact_button.connect("toggled", self._compact_button_changed)
+        self._icon_bar.pack_end(self._compact_button, False, False, 0)
+
         self._calibrate_button.set_tooltip_text("Calibrate a mode: click this, then the mode's icon")
         self._calibrate_button.connect("toggled", self._calibrate_button_changed)
         self._icon_bar.pack_end(self._calibrate_button, False, False, 0)
@@ -381,6 +399,13 @@ class MainWindow(Gtk.Window):
             if field is self._points_text:
                 cell.pack_start(self._goods_level_box, True, True, 0)
             grid.attach(cell, 1, i + 1, 1, 1)
+
+            # Shown or hidden by the compact button rather than by the window showing everything; a grid row with nothing
+            # showing takes no room
+            for widget in (label, cell):
+                widget.set_no_show_all(True)
+                widget.show()
+            self._field_rows.append((label, cell))
 
 
         for button in self._mode_buttons:
@@ -447,6 +472,9 @@ class MainWindow(Gtk.Window):
         self._pin_button.set_active(bool(s[SettingsKey.stay_on_top]))
         self._apply_stay_on_top()
 
+        self._compact_button.set_active(bool(s[SettingsKey.compact]))
+        self._apply_compact()
+
     # MARK: - Stay on top
 
     def _pin_button_changed(self, _):
@@ -461,6 +489,24 @@ class MainWindow(Gtk.Window):
                 overlay.hide()
             else:
                 overlay.show()
+
+    # MARK: - Compact
+
+    def _compact_button_changed(self, _):
+        self._settings[SettingsKey.compact] = self._compact_button.get_active()
+        self._settings.save()
+        self._apply_compact()
+
+    # Hides the field rows, so Start sits just under the icon bar; the window isn't resizable, so it shrinks to fit and grows
+    # back when they show again
+    def _apply_compact(self):
+        compact = self._compact_button.get_active()
+
+        for label, cell in self._field_rows:
+            label.set_visible(not compact)
+            cell.set_visible(not compact)
+
+        self._compact_button.set_tooltip_text("Show the fields again" if compact else "Shrink MouseMe to its icons, Start button and status bar")
 
     # Stays above every other window, including after a run minimizes and restores it, until the pin is clicked again
     def _apply_stay_on_top(self):

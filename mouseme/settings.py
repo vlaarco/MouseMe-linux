@@ -14,6 +14,7 @@ class SettingsKey:
     gbg = "GBG"
     qi = "QI"
     stay_on_top = "StayOnTop"
+    compact = "Compact"
     build_menu = "BuildMenu"
     spots = "Spots"
     confirm_spots = "ConfirmSpots"
@@ -39,6 +40,7 @@ class SettingsKey:
         gbg: False,
         qi: False,
         stay_on_top: False,
+        compact: False,
         build_menu: False,
         spots: None,
         confirm_spots: None,
