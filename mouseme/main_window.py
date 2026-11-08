@@ -1,4 +1,5 @@
 import math
+import threading
 
 import cairo
 from gi.repository import Gdk, GLib, Gtk, Pango
@@ -167,6 +168,16 @@ class MainWindow(Gtk.Window):
 
         # Set while a QI or Build run is going, when the Start button is Stop
         self._stop_button_shown = False
+        self._settings_loaded = False
+
+        # Set while QI or Build turns the other icons off on its way to replacing the run going
+        self._switching_run = False
+
+        # The engine thread's latest Stop or Start, applied once on the main thread so a run replaced by another doesn't
+        # flicker the button to Start and back
+        self._stop_button_lock = threading.Lock()
+        self._wanted_stop_button = False
+        self._stop_button_update_queued = False
 
         self._build_ui()
 
@@ -176,6 +187,9 @@ class MainWindow(Gtk.Window):
         for field in (self._points_text, self._start_delay_text, self._loop_delay_text, self._delay_text, self._repetitions_text):
             field.connect("changed", lambda _: self._refresh_status())
         self._load_settings()
+
+        # Set once the saved modes are back, so turning QI or Build on at launch doesn't start it
+        self._settings_loaded = True
 
         self.set_resizable(False)
         if icon_path:
@@ -516,18 +530,28 @@ class MainWindow(Gtk.Window):
             self._calibrate_mode(button)
             return
 
-        # Changing mode ends a QI or Build run, the same as Stop; GBG and Army runs end when the mouse moves to click
-        if self._stop_button_shown:
+        # QI and Build start as soon as their icon turns them on, but not when the saved modes load at launch
+        auto_start = button.get_active() and button in (self._qi_check_box, self._build_menu_check_box) and self._settings_loaded
+
+        # Changing mode ends a QI or Build run, the same as Stop; GBG and Army runs end when the mouse moves to click.
+        # Going straight to QI or Build skips this: the new run replaces the old one, so the button doesn't flicker to Start
+        # and back, and the icons it turns off along the way don't stop it either
+        if self._stop_button_shown and not auto_start and not self._switching_run:
             self._engine.post(self._engine.cancel_run)
 
         if button.get_active():
+            self._switching_run = auto_start
             for other in self._mode_buttons:
                 if other is not button:
                     other.set_active(False)
+            self._switching_run = False
 
             self._start_button.grab_focus()
 
         self._update_field_visibility()
+
+        if auto_start:
+            self._start_run()
 
     def _update_field_visibility(self):
         self.is_gbg_checked = self._gbg_check_box.get_active()
@@ -743,9 +767,19 @@ class MainWindow(Gtk.Window):
 
     # Called from the engine thread: while a QI or Build run is going, the Start button is Stop
     def show_stop_button(self, shown):
-        GLib.idle_add(self._show_stop_button, shown)
+        with self._stop_button_lock:
+            self._wanted_stop_button = shown
+            if self._stop_button_update_queued:
+                return
+            self._stop_button_update_queued = True
 
-    def _show_stop_button(self, shown):
+        GLib.idle_add(self._show_stop_button)
+
+    def _show_stop_button(self):
+        with self._stop_button_lock:
+            shown = self._wanted_stop_button
+            self._stop_button_update_queued = False
+
         self._stop_button_shown = shown
         self._start_button.set_label("Stop" if shown else "Start")
         return False
@@ -756,6 +790,10 @@ class MainWindow(Gtk.Window):
             self._engine.post(self._engine.cancel_run)
             return
 
+        self._start_run()
+
+    # Starts the checked mode, replacing any run still going
+    def _start_run(self):
         is_gbg = self._gbg_check_box.get_active()
         is_qi = self._qi_check_box.get_active()
         is_build_menu = self._build_menu_check_box.get_active()
